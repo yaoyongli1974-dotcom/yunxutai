@@ -64,6 +64,8 @@ $router->get('/register', [AuthController::class, 'showRegister'], ['guest']);
 $router->post('/register', [AuthController::class, 'register'], ['guest']);
 $router->get('/login', [AuthController::class, 'showLogin'], ['guest']);
 $router->post('/login', [AuthController::class, 'login'], ['guest']);
+$router->get('/2fa', [AuthController::class, 'showTwofactor'], ['guest']);
+$router->post('/2fa', [AuthController::class, 'loginTwofactorVerify'], ['guest']);
 $router->post('/logout', [AuthController::class, 'logout'], ['auth']);
 
 // 登录用户
@@ -71,6 +73,8 @@ $router->get('/dashboard', [DashboardController::class, 'index'], ['auth']);
 $router->get('/account', [AccountController::class, 'show'], ['auth']);
 $router->post('/account/profile', [AccountController::class, 'updateProfile'], ['auth']);
 $router->post('/account/password', [AccountController::class, 'updatePassword'], ['auth']);
+$router->post('/account/totp/activate', [AccountController::class, 'activateTotp'], ['auth']);
+$router->post('/account/totp/disable', [AccountController::class, 'disableTotp'], ['auth']);
 $router->post('/account/data-request', [AccountController::class, 'requestData'], ['auth']);
 
 // 祭奠与留言
@@ -168,6 +172,7 @@ $router->post('/admin/ai-jobs/{id}/retry', [AdminAiJobController::class, 'retry'
 
 $router->get('/admin/users', [AdminUserController::class, 'index'], ['admin']);
 $router->post('/admin/users/{id}/status', [AdminUserController::class, 'updateStatus'], ['admin']);
+$router->post('/admin/users/{id}/totp/reset', [AdminUserController::class, 'resetTotp'], ['admin']);
 
 $router->get('/admin/logs', [AdminLogController::class, 'index'], ['admin']);
 

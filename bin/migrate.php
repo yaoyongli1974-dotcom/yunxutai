@@ -66,6 +66,20 @@ function constraintExists(string $database, string $table, string $constraint): 
 echo "静思园 · 数据库迁移\n数据库：{$database}\n\n";
 
 try {
+    if (!columnExists($database, 'users', 'totp_secret')) {
+        Db::query("ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64) DEFAULT NULL AFTER status");
+        echo "✓ users 新增 totp_secret\n";
+    } else {
+        echo "· users.totp_secret 已存在\n";
+    }
+
+    if (!columnExists($database, 'users', 'totp_enabled')) {
+        Db::query("ALTER TABLE users ADD COLUMN totp_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER totp_secret");
+        echo "✓ users 新增 totp_enabled\n";
+    } else {
+        echo "· users.totp_enabled 已存在\n";
+    }
+
     $wasVerificationColumnMissing = !columnExists($database, 'memorials', 'verification_status');
 
     if ($wasVerificationColumnMissing) {

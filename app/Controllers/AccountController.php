@@ -11,6 +11,7 @@ use App\Core\Flash;
 use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Totp;
 use App\Core\Validator;
 use App\Core\View;
 use App\Models\DataRequest;
@@ -21,14 +22,23 @@ final class AccountController
     public function show(Request $request): Response
     {
         $user = Auth::user();
+        $tab = (string) ($request->query['tab'] ?? 'profile');
+        if (!in_array($tab, ['profile', 'security', 'privacy', '2fa'], true)) {
+            $tab = 'profile';
+        }
 
-        return View::render('account/settings', [
+        $data = [
             'title' => '账号设置',
             'user' => $user,
             'requests' => DataRequest::forUser((int) $user['id']),
             'errors' => [],
-            'tab' => (string) ($request->query['tab'] ?? 'profile'),
-        ]);
+            'tab' => $tab,
+        ];
+        if ($tab === '2fa') {
+            $data += $this->twofactorViewData($user);
+        }
+
+        return View::render('account/settings', $data);
     }
 
     public function updateProfile(Request $request): Response
@@ -106,6 +116,75 @@ final class AccountController
         return Response::redirect('/account?tab=security');
     }
 
+    public function activateTotp(Request $request): Response
+    {
+        Csrf::verify($request);
+        $user = Auth::user();
+
+        if ((int) ($user['totp_enabled'] ?? 0) === 1) {
+            Flash::info('二次验证已启用，无需重复操作。');
+            return Response::redirect('/account?tab=2fa');
+        }
+
+        $secret = $_SESSION['pending_totp_secret'] ?? '';
+        $code = (string) $request->raw('code', '');
+        $errors = [];
+
+        if (!is_string($secret) || $secret === '') {
+            $errors['form'] = '待确认的密钥已失效，请重新获取后再试';
+        } elseif (!preg_match('/^\d{6}$/', $code)) {
+            $errors['code'] = '请输入 6 位动态验证码';
+        } elseif (!Totp::verifyCode($secret, $code)) {
+            $errors['code'] = '验证码不正确，请确认身份验证器时间准确';
+        }
+
+        if ($errors !== []) {
+            return $this->renderTwofactor($user, $errors, 422);
+        }
+
+        User::update((int) $user['id'], [
+            'totp_secret' => $secret,
+            'totp_enabled' => 1,
+        ]);
+        unset($_SESSION['pending_totp_secret']);
+        Audit::log('totp.enable', 'user', (int) $user['id']);
+        Flash::success('二次验证已启用。下次登录需要输入身份验证器中的动态码。');
+        return Response::redirect('/account?tab=2fa');
+    }
+
+    public function disableTotp(Request $request): Response
+    {
+        Csrf::verify($request);
+        $user = Auth::user();
+
+        $secret = (string) ($user['totp_secret'] ?? '');
+        if ((int) ($user['totp_enabled'] ?? 0) !== 1 || $secret === '') {
+            Flash::info('当前账号尚未启用二次验证。');
+            return Response::redirect('/account?tab=2fa');
+        }
+
+        $code = (string) $request->raw('code', '');
+        $errors = [];
+        if (!preg_match('/^\d{6}$/', $code)) {
+            $errors['code'] = '请输入 6 位动态验证码';
+        } elseif (!Totp::verifyCode($secret, $code)) {
+            $errors['code'] = '验证码不正确，请确认身份验证器时间准确';
+        }
+
+        if ($errors !== []) {
+            return $this->renderTwofactor($user, $errors, 422);
+        }
+
+        User::update((int) $user['id'], [
+            'totp_secret' => null,
+            'totp_enabled' => 0,
+        ]);
+        unset($_SESSION['pending_totp_secret']);
+        Audit::log('totp.disable', 'user', (int) $user['id']);
+        Flash::success('二次验证已停用。此后登录只需密码。');
+        return Response::redirect('/account?tab=2fa');
+    }
+
     public function requestData(Request $request): Response
     {
         Csrf::verify($request);
@@ -149,5 +228,42 @@ final class AccountController
         Audit::log('data_request.create', 'data_request', $id, ['type' => $type, 'memorial_id' => $memorialId]);
         Flash::success('申请已记录。平台会在核验身份后处理，并通过你留下的联系方式回复。');
         return Response::redirect('/account?tab=privacy');
+    }
+
+    private function twofactorViewData(array $user): array
+    {
+        $enabled = (int) ($user['totp_enabled'] ?? 0) === 1 && (string) ($user['totp_secret'] ?? '') !== '';
+        if ($enabled) {
+            unset($_SESSION['pending_totp_secret']);
+            return [
+                'totpEnabled' => true,
+                'pendingSecret' => null,
+                'otpauthUri' => null,
+            ];
+        }
+
+        $pending = $_SESSION['pending_totp_secret'] ?? null;
+        if (!is_string($pending) || $pending === '') {
+            $pending = Totp::generateSecret();
+            $_SESSION['pending_totp_secret'] = $pending;
+        }
+
+        return [
+            'totpEnabled' => false,
+            'pendingSecret' => $pending,
+            'otpauthUri' => Totp::otpauthUri((string) $user['email'], $pending),
+        ];
+    }
+
+    private function renderTwofactor(array $user, array $errors, int $status): Response
+    {
+        return View::render('account/settings', [
+            'title' => '账号设置',
+            'user' => $user,
+            'requests' => DataRequest::forUser((int) $user['id']),
+            'errors' => $errors,
+            'tab' => '2fa',
+            ...$this->twofactorViewData($user),
+        ], 'layout', $status);
     }
 }

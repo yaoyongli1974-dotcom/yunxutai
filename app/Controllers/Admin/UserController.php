@@ -66,6 +66,29 @@ final class UserController
         return Response::redirect('/admin/users');
     }
 
+    public function resetTotp(Request $request, string $id): Response
+    {
+        Csrf::verify($request);
+        $this->guard();
+
+        $target = User::find((int) $id);
+        if ($target === null) {
+            throw new HttpException(404, '用户不存在');
+        }
+
+        // 逃生通道：手机丢失或更换设备时由管理员解除二次验证；该操作只清空字段，不改密码。
+        User::update((int) $target['id'], [
+            'totp_secret' => null,
+            'totp_enabled' => 0,
+        ]);
+        Audit::log('totp.reset', 'user', (int) $target['id'], [
+            'email' => (string) $target['email'],
+        ]);
+
+        Flash::success('已重置 ' . $target['display_name'] . ' 的二次验证。该账号下次登录仅需密码，请提醒其尽快重新绑定。');
+        return Response::redirect('/admin/users');
+    }
+
     private function renderIndex(Request $request, string $query = '', array $errors = [], array $old = [], int $httpStatus = 200): Response
     {
         $total = User::searchCount($query);

@@ -35,6 +35,7 @@ $statusLabels = ['active' => '正常', 'disabled' => '已禁用'];
                         <th>用户</th>
                         <th>角色</th>
                         <th>状态</th>
+                        <th>二次验证</th>
                         <th>最后登录</th>
                         <th>注册时间</th>
                         <th>操作</th>
@@ -42,7 +43,7 @@ $statusLabels = ['active' => '正常', 'disabled' => '已禁用'];
                     </thead>
                     <tbody>
                     <?php if ($users === []): ?>
-                        <tr><td colspan="7" class="muted">没有符合条件的用户。</td></tr>
+                        <tr><td colspan="8" class="muted">没有符合条件的用户。</td></tr>
                     <?php endif; ?>
                     <?php foreach ($users as $account): ?>
                         <tr>
@@ -53,6 +54,13 @@ $statusLabels = ['active' => '正常', 'disabled' => '已禁用'];
                             </td>
                             <td><?= e(role_label($account['role'])) ?></td>
                             <td><span class="admin-badge admin-badge--<?= e($account['status']) ?>"><?= e($statusLabels[$account['status']] ?? $account['status']) ?></span></td>
+                            <td>
+                                <?php if ((int) ($account['totp_enabled'] ?? 0) === 1): ?>
+                                    <span class="admin-badge admin-badge--active">已启用</span>
+                                <?php else: ?>
+                                    <span class="admin-badge admin-badge--draft">未启用</span>
+                                <?php endif; ?>
+                            </td>
                             <td class="muted"><?= e(format_datetime($account['last_login_at']) ?: '从未登录') ?></td>
                             <td class="muted"><?= e(format_datetime($account['created_at'])) ?></td>
                             <td>
@@ -70,6 +78,13 @@ $statusLabels = ['active' => '正常', 'disabled' => '已禁用'];
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="action" value="enable">
                                         <button class="button button--small" type="submit">启用账号</button>
+                                    </form>
+                                <?php endif; ?>
+                                <?php if ((int) ($account['totp_enabled'] ?? 0) === 1): ?>
+                                    <form method="post" action="<?= e(url('/admin/users/' . (int) $account['id'] . '/totp/reset')) ?>" style="margin-top:0.45rem;">
+                                        <?= csrf_field() ?>
+                                        <button class="button button--small button--danger" type="submit">重置二次验证</button>
+                                        <p class="muted" style="font-size:0.74rem;margin:0.3rem 0 0;">用于手机丢失解锁；重置后仅凭密码即可登录。</p>
                                     </form>
                                 <?php endif; ?>
                             </td>

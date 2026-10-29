@@ -20,6 +20,7 @@ use App\Core\Policy;
 use App\Core\RateLimiter;
 use App\Core\Storage;
 use App\Core\Str;
+use App\Core\Totp;
 use App\Core\Validator;
 use App\Models\Media;
 use App\Models\Message;
@@ -1180,6 +1181,201 @@ test('成员管理：馆主查看/邀请/角色/移除/作废', function (): voi
         if ($familyMemberId > 0) {
             Db::query("UPDATE memorial_members SET status = 'active', role = 'editor' WHERE id = ?", [$familyMemberId]);
         }
+    }
+});
+
+echo "\n[管理端 2FA]\n";
+
+$cleanupTotp = static function (string $email): void {
+    $account = \App\Models\User::findByEmail($email);
+    if ($account !== null) {
+        Db::update('users', ['totp_secret' => null, 'totp_enabled' => 0], 'id = ?', [(int) $account['id']]);
+    }
+};
+
+test('TOTP 算法自洽与 RFC 6238 向量', function (): void {
+    $secret = Totp::generateSecret();
+    check(preg_match('/^[A-Z2-7]{32}$/', $secret) === 1, '生成的 Base32 密钥应为 32 个字符');
+
+    // RFC 6238 SHA1 测试密钥（ASCII "12345678901234567890"）在 t=59 的 8 位向量为 94287082。
+    check(Totp::at('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 59) === '287082', 'RFC 6238 向量不匹配');
+
+    $now = time();
+    $code = Totp::at($secret, $now);
+    check(preg_match('/^\d{6}$/', $code) === 1, '校验码应为 6 位数字');
+    check(Totp::verifyCode($secret, $code, 0), '当前时间片应通过');
+    check(Totp::verifyCode($secret, Totp::at($secret, $now - 30)), '允许前 1 个时间片');
+    check(Totp::verifyCode($secret, Totp::at($secret, $now + 30)), '允许后 1 个时间片');
+    check(!Totp::verifyCode($secret, Totp::at($secret, $now - 90)), '超出窗口应拒绝');
+    check(!Totp::verifyCode($secret, 'abcdef'), '非数字应拒绝');
+    check(!Totp::verifyCode('not-base32', '123456'), '非法密钥应拒绝');
+
+    $uri = Totp::otpauthUri('admin@example.com', $secret);
+    check(str_starts_with($uri, 'otpauth://totp/' . rawurlencode('静思园:admin@example.com') . '?'), 'otpauth 标签编码不正确');
+    check_contains($uri, 'secret=' . $secret, 'otpauth 缺少密钥');
+    check_contains($uri, 'issuer=静思园', 'otpauth 缺少发行方');
+    check_contains($uri, 'digits=6', 'otpauth 位数不正确');
+    check_contains($uri, 'period=30', 'otpauth 周期不正确');
+
+    foreach (['totp_secret', 'totp_enabled'] as $column) {
+        check(
+            (int) Db::value(
+                'SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?',
+                ['users', $column]
+            ) === 1,
+            'users 表缺少 ' . $column
+        );
+    }
+});
+
+test('未启用 2FA 的管理员登录行为不变', function () use ($cleanupTotp): void {
+    $cleanupTotp('admin@example.com');
+    login('admin@example.com', 'TestAdmin@123');
+    $response = http('GET', '/admin');
+    check($response['status'] === 200, '管理员后台不可访问');
+    check_contains($response['body'], '运营概览', '后台首页内容异常');
+    logout();
+});
+
+test('2FA 登录闸门、限流与停用流程', function () use ($cleanupTotp): void {
+    global $baseUrl;
+
+    $cleanupTotp('admin@example.com');
+    $admin = \App\Models\User::findByEmail('admin@example.com');
+    check($admin !== null, '测试管理员不存在');
+    $adminId = (int) $admin['id'];
+    $secret = Totp::generateSecret();
+    Db::update('users', ['totp_secret' => $secret, 'totp_enabled' => 1], 'id = ?', [$adminId]);
+
+    $host = (string) (parse_url($baseUrl, PHP_URL_HOST) ?: '127.0.0.1');
+    // 测试请求从本机发出，兼容 IPv4/IPv6 与自定义 BASE_URL 主机名。
+    $limitKeys = array_unique(['2fa:' . $host . ':' . $adminId, '2fa:127.0.0.1:' . $adminId, '2fa:::1:' . $adminId]);
+    foreach ($limitKeys as $limitKey) {
+        RateLimiter::clear($limitKey);
+    }
+
+    try {
+        reset_session();
+        $token = csrf_token('/login');
+        $start = http('POST', '/login', [
+            '_token' => $token,
+            'email' => 'admin@example.com',
+            'password' => 'TestAdmin@123',
+            'next' => '/admin',
+        ], [], false);
+        check($start['status'] === 302, '启用 2FA 后密码登录应被拦截，实际 ' . $start['status']);
+        check(str_contains($start['location'], '/2fa'), '应跳转 /2fa，实际 ' . $start['location']);
+
+        $page = http('GET', '/2fa');
+        check($page['status'] === 200, '2FA 页面不可访问');
+        check_contains($page['body'], '动态验证码', '2FA 页面缺少验证码表单');
+
+        $blockedAdmin = http('GET', '/admin', null, [], false);
+        check($blockedAdmin['status'] === 302, '未完成 2FA 不应能访问后台');
+        check(str_contains($blockedAdmin['location'], '/login'), '未完成 2FA 应回到登录页');
+
+        $token = csrf_token('/2fa');
+        $now = time();
+        $accepted = [
+            Totp::at($secret, $now - 60),
+            Totp::at($secret, $now - 30),
+            Totp::at($secret, $now),
+            Totp::at($secret, $now + 30),
+            Totp::at($secret, $now + 60),
+        ];
+        $wrong = sprintf('%06d', ((int) Totp::at($secret, $now) + 1) % 1000000);
+        while (in_array($wrong, $accepted, true)) {
+            $wrong = sprintf('%06d', ((int) $wrong + 1) % 1000000);
+        }
+
+        $bad = http('POST', '/2fa', ['_token' => $token, 'code' => $wrong]);
+        check($bad['status'] === 422, '错误验证码应返回 422，实际 ' . $bad['status']);
+        check_contains($bad['body'], '验证码不正确', '错误提示缺失');
+
+        for ($i = 0; $i < 4; $i++) {
+            $again = http('POST', '/2fa', ['_token' => $token, 'code' => $wrong]);
+            check($again['status'] === 422, '第 ' . ($i + 2) . ' 次错误码应仍为 422');
+        }
+        $limited = http('POST', '/2fa', ['_token' => $token, 'code' => $wrong]);
+        check($limited['status'] === 429, '超过尝试上限应返回 429，实际 ' . $limited['status']);
+        check_contains($limited['body'], '尝试次数过多', '限流提示缺失');
+        foreach ($limitKeys as $limitKey) {
+            RateLimiter::clear($limitKey);
+        }
+
+        $token = csrf_token('/2fa');
+        $success = http('POST', '/2fa', ['_token' => $token, 'code' => Totp::at($secret, time())]);
+        check($success['status'] === 200, '正确验证码登录失败，状态 ' . $success['status']);
+        check(effective_path($success['url']) === '/admin', '应回到原 next=/admin，实际 ' . effective_path($success['url']));
+        check_contains($success['body'], '运营概览', '登录后后台内容异常');
+
+        $accountPage = http('GET', '/account?tab=2fa');
+        check($accountPage['status'] === 200, '二次验证设置页不可访问');
+        check_contains($accountPage['body'], '二次验证已启用', '启用状态未展示');
+
+        $token = csrf_token('/account?tab=2fa');
+        $disabled = http('POST', '/account/totp/disable', ['_token' => $token, 'code' => Totp::at($secret, time())]);
+        check($disabled['status'] === 200, '停用 2FA 失败，状态 ' . $disabled['status']);
+        check_contains($disabled['body'], '二次验证已停用', '停用成功提示缺失');
+
+        $fresh = \App\Models\User::find($adminId);
+        check((int) $fresh['totp_enabled'] === 0, '停用后 totp_enabled 应为 0');
+        check($fresh['totp_secret'] === null, '停用后 totp_secret 应清空');
+
+        logout();
+        login('admin@example.com', 'TestAdmin@123');
+        $after = http('GET', '/admin');
+        check($after['status'] === 200, '停用 2FA 后管理员应可正常登录');
+    } finally {
+        $cleanupTotp('admin@example.com');
+        foreach ($limitKeys as $limitKey) {
+            RateLimiter::clear($limitKey);
+        }
+        reset_session();
+    }
+});
+
+test('管理员重置他人 2FA 与权限边界', function () use ($cleanupTotp): void {
+    $cleanupTotp('demo@example.com');
+    $demo = \App\Models\User::findByEmail('demo@example.com');
+    check($demo !== null, '演示账号不存在');
+    $demoId = (int) $demo['id'];
+
+    try {
+        login('demo@example.com', 'Demo@123456');
+        $token = csrf_token('/account?tab=2fa');
+        $forbidden = http('POST', '/admin/users/' . $demoId . '/totp/reset', ['_token' => $token], [], false);
+        check($forbidden['status'] === 403, '普通用户调用重置端点应 403，实际 ' . $forbidden['status']);
+
+        login('admin@example.com', 'TestAdmin@123');
+        $secret = Totp::generateSecret();
+        Db::update('users', ['totp_secret' => $secret, 'totp_enabled' => 1], 'id = ?', [$demoId]);
+
+        $list = http('GET', '/admin/users?q=demo%40example.com');
+        check($list['status'] === 200, '用户列表不可访问');
+        check_contains($list['body'], '已启用', '用户列表未展示 2FA 状态');
+        check_contains($list['body'], '重置二次验证', '用户列表缺少重置入口');
+
+        $token = csrf_token('/admin/users');
+        $reset = http('POST', '/admin/users/' . $demoId . '/totp/reset', ['_token' => $token]);
+        check($reset['status'] === 200, '重置 2FA 失败，状态 ' . $reset['status']);
+        check(effective_path($reset['url']) === '/admin/users', '重置后应回到用户列表');
+        check_contains($reset['body'], '已重置', '重置成功提示缺失');
+
+        $fresh = \App\Models\User::find($demoId);
+        check((int) $fresh['totp_enabled'] === 0, '重置后 totp_enabled 应为 0');
+        check($fresh['totp_secret'] === null, '重置后 totp_secret 应清空');
+
+        $audit = Db::fetch(
+            "SELECT meta FROM audit_logs WHERE action = 'totp.reset' AND target_type = 'user' AND target_id = ? ORDER BY id DESC LIMIT 1",
+            [$demoId]
+        );
+        check($audit !== null, '重置操作应写审计');
+        check(!str_contains((string) $audit['meta'], $secret), '审计日志不得包含 TOTP 密钥');
+    } finally {
+        $cleanupTotp('demo@example.com');
+        $cleanupTotp('admin@example.com');
+        logout();
     }
 });
 

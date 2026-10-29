@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
     display_name VARCHAR(80) NOT NULL,
     role ENUM('user','admin') NOT NULL DEFAULT 'user',
     status ENUM('active','disabled') NOT NULL DEFAULT 'active',
+    totp_secret VARCHAR(64) DEFAULT NULL,
+    totp_enabled TINYINT(1) NOT NULL DEFAULT 0,
     email_verified_at DATETIME DEFAULT NULL,
     last_login_at DATETIME DEFAULT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -8,10 +8,11 @@
             </div>
         </header>
 
-        <?php $currentTab = in_array($tab ?? 'profile', ['profile', 'security', 'privacy'], true) ? $tab : 'profile'; ?>
+        <?php $currentTab = in_array($tab ?? 'profile', ['profile', 'security', 'privacy', '2fa'], true) ? $tab : 'profile'; ?>
         <nav class="tabs" aria-label="设置分区">
             <a href="<?= e(url('/account?tab=profile')) ?>"<?= $currentTab === 'profile' ? ' aria-current="true"' : '' ?>>基本资料</a>
             <a href="<?= e(url('/account?tab=security')) ?>"<?= $currentTab === 'security' ? ' aria-current="true"' : '' ?>>登录安全</a>
+            <a href="<?= e(url('/account?tab=2fa')) ?>"<?= $currentTab === '2fa' ? ' aria-current="true"' : '' ?>>二次验证</a>
             <a href="<?= e(url('/account?tab=privacy')) ?>"<?= $currentTab === 'privacy' ? ' aria-current="true"' : '' ?>>数据与隐私</a>
         </nav>
 
@@ -78,6 +79,16 @@
                         </div>
                     </form>
                 </section>
+
+            <?php elseif ($currentTab === '2fa'): ?>
+                <?php /* ---------- 二次验证 ---------- */ ?>
+                <?php App\Core\View::partial('account/security', [
+                    'user' => $user,
+                    'errors' => $errors,
+                    'totpEnabled' => $totpEnabled ?? false,
+                    'pendingSecret' => $pendingSecret ?? null,
+                    'otpauthUri' => $otpauthUri ?? null,
+                ]); ?>
 
             <?php else: ?>
                 <?php /* ---------- 数据与隐私 ---------- */ ?>

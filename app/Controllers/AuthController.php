@@ -10,12 +10,16 @@ use App\Core\Flash;
 use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Totp;
 use App\Core\Validator;
 use App\Core\View;
 use App\Models\User;
 
 final class AuthController
 {
+    private const PENDING_2FA_KEY = 'pending_2fa';
+    private const PENDING_2FA_TTL = 600;
+
     public function showRegister(Request $request): Response
     {
         return $this->renderRegister([], []);
@@ -135,6 +139,18 @@ final class AuthController
                 $errors['form'] = '邮箱或密码不正确';
             } else {
                 RateLimiter::clear('login:' . $request->ip() . ':' . $email);
+                if ((int) ($user['totp_enabled'] ?? 0) === 1) {
+                    // 密码通过但二次验证未完成：此时不建立登录态，只保存短时待验证上下文。
+                    session_regenerate_id(true);
+                    $_SESSION = [];
+                    $_SESSION['csrf'] = bin2hex(random_bytes(32));
+                    $_SESSION[self::PENDING_2FA_KEY] = [
+                        'uid' => (int) $user['id'],
+                        'next' => $next,
+                        'at' => time(),
+                    ];
+                    return Response::redirect('/2fa');
+                }
                 Auth::login($user);
                 Flash::success('欢迎回来，' . $user['display_name'] . '。');
                 return Response::redirect($next);
@@ -147,6 +163,73 @@ final class AuthController
             'old' => ['email' => $email],
             'next' => $next,
         ], 'layout', 422);
+    }
+
+    public function showTwofactor(Request $request): Response
+    {
+        $pending = $this->pendingTwofactor();
+        if ($pending === null) {
+            return Response::redirect('/login');
+        }
+
+        $user = User::find((int) $pending['uid']);
+        if ($user === null || $user['status'] !== 'active' || (int) $user['totp_enabled'] !== 1 || (string) ($user['totp_secret'] ?? '') === '') {
+            $this->clearPending();
+            Flash::error('二次验证状态已变更，请重新登录。');
+            return Response::redirect('/login');
+        }
+
+        return View::render('auth/twofactor', [
+            'title' => '二次验证',
+            'errors' => [],
+        ]);
+    }
+
+    public function loginTwofactorVerify(Request $request): Response
+    {
+        Csrf::verify($request);
+
+        $pending = $this->pendingTwofactor();
+        if ($pending === null) {
+            return Response::redirect('/login');
+        }
+
+        $user = User::find((int) $pending['uid']);
+        if ($user === null || $user['status'] !== 'active' || (int) $user['totp_enabled'] !== 1 || (string) ($user['totp_secret'] ?? '') === '') {
+            $this->clearPending();
+            Flash::error('二次验证状态已变更，请重新登录。');
+            return Response::redirect('/login');
+        }
+
+        $key = '2fa:' . $request->ip() . ':' . (int) $user['id'];
+        if (!RateLimiter::hit($key, (int) config('security.login_max_attempts'), (int) config('security.login_window'))) {
+            return View::render('auth/twofactor', [
+                'title' => '二次验证',
+                'errors' => ['form' => '尝试次数过多，请 15 分钟后再试'],
+            ], 'layout', 429);
+        }
+
+        $code = (string) $request->raw('code', '');
+        $errors = [];
+        if (!preg_match('/^\d{6}$/', $code)) {
+            $errors['code'] = '请输入 6 位动态验证码';
+        } elseif (!Totp::verifyCode((string) $user['totp_secret'], $code)) {
+            $errors['code'] = '验证码不正确，请确认身份验证器时间准确';
+        }
+
+        if ($errors !== []) {
+            return View::render('auth/twofactor', [
+                'title' => '二次验证',
+                'errors' => $errors,
+            ], 'layout', 422);
+        }
+
+        RateLimiter::clear($key);
+        $next = (string) ($pending['next'] ?? '/dashboard');
+        $this->clearPending();
+        Auth::login($user);
+        Flash::success('欢迎回来，' . $user['display_name'] . '。');
+        return Response::redirect($next);
     }
 
     public function logout(Request $request): Response
@@ -173,5 +256,23 @@ final class AuthController
             return $next;
         }
         return '/dashboard';
+    }
+
+    private function pendingTwofactor(): ?array
+    {
+        $pending = $_SESSION[self::PENDING_2FA_KEY] ?? null;
+        if (!is_array($pending) || !isset($pending['uid'], $pending['at'])) {
+            return null;
+        }
+        if (time() - (int) $pending['at'] > self::PENDING_2FA_TTL) {
+            $this->clearPending();
+            return null;
+        }
+        return $pending;
+    }
+
+    private function clearPending(): void
+    {
+        unset($_SESSION[self::PENDING_2FA_KEY]);
     }
 }
