@@ -128,6 +128,163 @@ final class ModerationController
         return Response::redirect('/admin/moderation');
     }
 
+    /** 批量处理待审留言：ids[] = 留言 id，status ∈ visible|hidden。 */
+    public function messageBatch(Request $request): Response
+    {
+        Csrf::verify($request);
+        $admin = $this->guard();
+
+        $status = (string) $request->raw('status', '');
+        if (!in_array($status, ['visible', 'hidden'], true)) {
+            return $this->renderIndex(['form' => '批量审核留言只能选择通过或隐藏'], ['batch' => 'messages'], 422);
+        }
+
+        $ids = $this->parseIds($request);
+        if ($ids === null) {
+            return $this->renderIndex(['form' => '请先勾选要处理的留言'], ['batch' => 'messages'], 422);
+        }
+
+        $done = 0;
+        $skipped = 0;
+        foreach ($ids as $id) {
+            $message = Message::find($id);
+            if ($message === null || (string) $message['status'] !== 'pending') {
+                $skipped++;
+                continue;
+            }
+            Message::setStatus($id, $status, (int) $admin['id']);
+            Audit::log('admin.message.status', 'message', $id, [
+                'status' => $status,
+                'memorial_id' => (int) $message['memorial_id'],
+                'batch' => true,
+            ]);
+            $done++;
+        }
+
+        Flash::success(sprintf('批量处理完成：留言已%s %d 条，跳过 %d 条（不存在或已处理）。', $status === 'visible' ? '通过展示' : '隐藏', $done, $skipped));
+        return Response::redirect('/admin/moderation');
+    }
+
+    /** 批量处理待审文章：ids[] = 文章 id，action ∈ approve|reject，可附统一审核说明。 */
+    public function articleBatch(Request $request): Response
+    {
+        Csrf::verify($request);
+        $admin = $this->guard();
+
+        $action = (string) $request->raw('action', '');
+        $note = trim((string) $request->input('review_note', ''));
+
+        if (!in_array($action, ['approve', 'reject'], true)) {
+            return $this->renderIndex(['form' => '批量审核文章只能选择通过或驳回'], ['batch' => 'articles'], 422);
+        }
+        if (mb_strlen($note) > 500) {
+            return $this->renderIndex(['form' => '审核说明不能超过 500 字'], ['batch' => 'articles', 'review_note' => $note], 422);
+        }
+
+        $ids = $this->parseIds($request);
+        if ($ids === null) {
+            return $this->renderIndex(['form' => '请先勾选要处理的文章'], ['batch' => 'articles'], 422);
+        }
+
+        $done = 0;
+        $skipped = 0;
+        foreach ($ids as $id) {
+            $article = Article::find($id);
+            if ($article === null || (string) $article['status'] !== 'pending') {
+                $skipped++;
+                continue;
+            }
+            if ($action === 'approve') {
+                Article::setStatus($id, 'published');
+                Audit::log('admin.article.approve', 'article', $id, [
+                    'memorial_id' => (int) $article['memorial_id'],
+                    'batch' => true,
+                ]);
+            } else {
+                Article::setStatus($id, 'rejected', $note !== '' ? $note : null);
+                Audit::log('admin.article.reject', 'article', $id, [
+                    'memorial_id' => (int) $article['memorial_id'],
+                    'review_note' => $note,
+                    'batch' => true,
+                ]);
+            }
+            $done++;
+        }
+
+        $verb = $action === 'approve' ? '通过发布' : '驳回';
+        Flash::success(sprintf('批量处理完成：文章已%s %d 篇，跳过 %d 篇（不存在或已处理）。', $verb, $done, $skipped));
+        return Response::redirect('/admin/moderation');
+    }
+
+    /** 批量处理媒体：ids[] = 媒体 id，action ∈ hide|show。 */
+    public function mediaBatch(Request $request): Response
+    {
+        Csrf::verify($request);
+        $admin = $this->guard();
+
+        $action = (string) $request->raw('action', '');
+        if (!in_array($action, ['hide', 'show'], true)) {
+            return $this->renderIndex(['form' => '批量操作媒体只能选择隐藏或恢复展示'], ['batch' => 'media'], 422);
+        }
+
+        $ids = $this->parseIds($request);
+        if ($ids === null) {
+            return $this->renderIndex(['form' => '请先勾选要处理的媒体'], ['batch' => 'media'], 422);
+        }
+
+        $done = 0;
+        $skipped = 0;
+        foreach ($ids as $id) {
+            $media = Media::find($id);
+            if ($media === null) {
+                $skipped++;
+                continue;
+            }
+            if ($action === 'show' && (string) $media['status'] !== 'hidden') {
+                $skipped++;
+                continue;
+            }
+            if ($action === 'hide') {
+                Media::hide($id);
+                Audit::log('admin.media.hide', 'media', $id, [
+                    'memorial_id' => (int) $media['memorial_id'],
+                    'batch' => true,
+                ]);
+            } else {
+                Media::show($id);
+                Audit::log('admin.media.show', 'media', $id, [
+                    'memorial_id' => (int) $media['memorial_id'],
+                    'batch' => true,
+                ]);
+            }
+            $done++;
+        }
+
+        $verb = $action === 'hide' ? '已隐藏' : '已恢复展示';
+        Flash::success(sprintf('批量处理完成：媒体%s %d 个，跳过 %d 个（不存在或状态不符）。', $verb, $done, $skipped));
+        return Response::redirect('/admin/moderation');
+    }
+
+    /** 解析并去重的勾选 id 列表；上Arthur 100 条，空返回 null。 */
+    private function parseIds(Request $request): ?array
+    {
+        $raw = $request->raw('ids', []);
+        if (!is_array($raw)) {
+            return null;
+        }
+        $ids = [];
+        foreach ($raw as $v) {
+            if (is_numeric($v)) {
+                $ids[(int) $v] = true;
+            }
+        }
+        $ids = array_keys($ids);
+        if ($ids === [] || count($ids) > 100) {
+            return null;
+        }
+        return array_values($ids);
+    }
+
     private function renderIndex(array $errors = [], array $old = [], int $status = 200): Response
     {
         $hiddenMedia = Db::fetchAll(

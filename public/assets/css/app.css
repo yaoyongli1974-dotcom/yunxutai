@@ -1805,6 +1805,11 @@ table.admin-table td p { margin: 0.15rem 0; }
 .admin-inline-form textarea { min-height: 62px; }
 .admin-inline-form .field { flex: 1 1 10rem; }
 .admin-inline-form > .button { flex: none; }
+.admin-batch-bar { border-top: 1px solid var(--line); padding-top: 0.75rem; align-items: center; margin-bottom: 0.6rem; }
+.admin-batch-bar .muted { font-size: 0.78rem; }
+.admin-col-check { width: 3rem; text-align: center; }
+.admin-col-check + .admin-col-check { width: 3rem; }
+.admin-table input[type="checkbox"] { accent-color: var(--accent); }
 .admin-definition + p, .admin-note p, .admin-danger p { margin-bottom: 0.5rem; }
 .admin-empty, .manage-empty { color: var(--muted); font-size: 0.86rem; padding: 0.5rem 0; border: 0; }
 

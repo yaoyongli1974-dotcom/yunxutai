@@ -22,6 +22,7 @@ use App\Core\Storage;
 use App\Core\Str;
 use App\Core\Totp;
 use App\Core\Validator;
+use App\Models\Article;
 use App\Models\Media;
 use App\Models\Message;
 use App\Models\Memorial;
@@ -725,6 +726,78 @@ test('留言转义，防止存储型 XSS', function (): void {
     check_not_contains($response['body'], $payload, '未转义的脚本被输出');
     check_contains($response['body'], '&lt;script&gt;alert(1)&lt;/script&gt;', '转义输出缺失');
     Db::query('DELETE FROM messages WHERE id = ?', [$id]);
+});
+
+test('管理员批量审核留言、文章与媒体', function (): void {
+    $memorial = Memorial::findBySlug('zhang-mingyuan');
+
+    // 三条待审留言：两条批量通过，一条单条路径已在前面用例覆盖
+    $ids = [];
+    for ($i = 0; $i < 3; $i++) {
+        $ids[] = Message::create((int) $memorial['id'], null, '批量测试', '批量审核留言 ' . bin2hex(random_bytes(4)), null, 'pending');
+    }
+
+    logout();
+    login('admin@example.com', 'TestAdmin@123');
+
+    // 无勾选：422 并提示
+    $empty = http('POST', '/admin/moderation/messages/batch', ['_token' => csrf_token('/admin/moderation')]);
+    check($empty['status'] === 422, '未勾选应 422，实际 ' . $empty['status']);
+
+    // 勾选两条 + 一个不存在的 id：仅两条被通过
+    $batch = http('POST', '/admin/moderation/messages/batch', [
+        '_token' => csrf_token('/admin/moderation'),
+        'status' => 'visible',
+        'ids' => [$ids[0], $ids[1], '99999999'],
+    ]);
+    check($batch['status'] === 200, '批量留言审核失败，状态 ' . $batch['status']);
+    check(Message::find((int) $ids[0])['status'] === 'visible', '留言 1 应被批量通过');
+    check(Message::find((int) $ids[1])['status'] === 'visible', '留言 2 应被批量通过');
+    check(Message::find((int) $ids[2])['status'] === 'pending', '留言 3 不应受影响');
+
+    // 已通过展示的留言 1 再次进入批量：pnen 仅处理 pending，应跳过保持 visible
+    $reapply = http('POST', '/admin/moderation/messages/batch', [
+        '_token' => csrf_token('/admin/moderation'),
+        'status' => 'hidden',
+        'ids' => [$ids[0]],
+    ]);
+    check($reapply['status'] === 200, '批量提交失败');
+    check(Message::find((int) $ids[0])['status'] === 'visible', '非 pending 留言应被跳过；不应被批量隐藏');
+
+    // 文章：两篇 pending，一篇批量驳回（带说明），一篇批量通过
+    $authorId = (int) Db::value("SELECT id FROM users WHERE email = 'demo@example.com' LIMIT 1");
+    $articleSeed = static fn(string $title): array => [
+        'title' => $title,
+        'content' => '批量审核文章内容，长度需满足校验要求，因此这里写足够长的正文以确保测试稳定通过。',
+        'author_name' => '批量测试',
+        'status' => 'pending',
+    ];
+    $a1 = Article::create((int) $memorial['id'], $articleSeed('批量文章 A ' . bin2hex(random_bytes(3))), $authorId);
+    $a2 = Article::create((int) $memorial['id'], $articleSeed('批量文章 B ' . bin2hex(random_bytes(3))), $authorId);
+    $reject = http('POST', '/admin/moderation/articles/batch', [
+        '_token' => csrf_token('/admin/moderation'),
+        'action' => 'reject',
+        'review_note' => '批量驳回说明',
+        'ids' => [$a1],
+    ]);
+    check($reject['status'] === 200, '批量驳回文章失败，状态 ' . $reject['status']);
+    $rowA = Article::find((int) $a1);
+    check($rowA['status'] === 'rejected', '文章 A 应被驳回');
+    check($rowA['review_note'] === '批量驳回说明', '驳回说明应落库');
+    $approve = http('POST', '/admin/moderation/articles/batch', [
+        '_token' => csrf_token('/admin/moderation'),
+        'action' => 'approve',
+        'ids' => [$a2],
+    ]);
+    check($approve['status'] === 200, '批量通过文章失败');
+    check(Article::find((int) $a2)['status'] === 'published', '文章 B 应发布');
+
+    logout();
+
+    foreach ($ids as $id) {
+        Db::query('DELETE FROM messages WHERE id = ?', [$id]);
+    }
+    Db::query('DELETE FROM articles WHERE id IN (?, ?)', [$a1, $a2]);
 });
 
 echo "\n[隐私与媒体鉴权]\n";

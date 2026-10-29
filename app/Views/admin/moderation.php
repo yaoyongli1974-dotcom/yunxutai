@@ -31,12 +31,19 @@ $mediaKinds = ['photo' => '照片', 'video' => '视频', 'audio' => '音频', 'd
                 <?php if ($pendingMessages === []): ?>
                     <p class="admin-empty">暂无待审留言。</p>
                 <?php else: ?>
+                    <form id="batch-messages-form" method="post" action="<?= e(url('/admin/moderation/messages/batch')) ?>" class="admin-inline-form admin-batch-bar">
+                        <?= csrf_field() ?>
+                        <button class="button button--small" type="submit" name="status" value="visible">批量通过展示</button>
+                        <button class="button button--small button--ghost" type="submit" name="status" value="hidden">批量隐藏</button>
+                        <span class="muted">勾选后批量处理，每次最多 50 条。</span>
+                    </form>
                     <div class="admin-table-wrap">
                         <table class="admin-table">
-                            <thead><tr><th>留言内容</th><th>纪念馆</th><th>时间</th><th>审核</th></tr></thead>
+                            <thead><tr><th class="admin-col-check">选</th><th>留言内容</th><th>纪念馆</th><th>时间</th><th>审核</th></tr></thead>
                             <tbody>
                             <?php foreach ($pendingMessages as $message): ?>
                                 <tr>
+                                    <td><input type="checkbox" name="ids[]" value="<?= (int) $message['id'] ?>" form="batch-messages-form" aria-label="选择留言 <?= (int) $message['id'] ?>"></td>
                                     <td>
                                         <strong><?= e($message['author_name']) ?></strong>
                                         <p><?= e(excerpt_text($message['content'], 160)) ?></p>
@@ -72,12 +79,22 @@ $mediaKinds = ['photo' => '照片', 'video' => '视频', 'audio' => '音频', 'd
                 <?php if ($pendingArticles === []): ?>
                     <p class="admin-empty">暂无待审文章。</p>
                 <?php else: ?>
+                    <form id="batch-articles-form" method="post" action="<?= e(url('/admin/moderation/articles/batch')) ?>" class="admin-inline-form admin-batch-bar">
+                        <?= csrf_field() ?>
+                        <label class="field">
+                            <span>批量审核说明（驳回时建议填写）</span>
+                            <textarea name="review_note" maxlength="500" placeholder="最多 500 字"></textarea>
+                        </label>
+                        <button class="button button--small" type="submit" name="action" value="approve">批量通过发布</button>
+                        <button class="button button--small button--ghost" type="submit" name="action" value="reject">批量驳回</button>
+                    </form>
                     <div class="admin-table-wrap">
                         <table class="admin-table">
-                            <thead><tr><th>文章</th><th>纪念馆</th><th>时间</th><th>审核</th></tr></thead>
+                            <thead><tr><th class="admin-col-check">选</th><th>文章</th><th>纪念馆</th><th>时间</th><th>审核</th></tr></thead>
                             <tbody>
                             <?php foreach ($pendingArticles as $article): ?>
                                 <tr>
+                                    <td><input type="checkbox" name="ids[]" value="<?= (int) $article['id'] ?>" form="batch-articles-form" aria-label="选择文章 <?= (int) $article['id'] ?>"></td>
                                     <td>
                                         <strong><?= e($article['title']) ?></strong>
                                         <p class="muted"><?= e($article['author_name'] ?: '未署名') ?></p>
@@ -120,12 +137,18 @@ $mediaKinds = ['photo' => '照片', 'video' => '视频', 'audio' => '音频', 'd
                 <?php if ($hiddenMedia === []): ?>
                     <p class="admin-empty">暂无已隐藏媒体。</p>
                 <?php else: ?>
+                    <form id="batch-hidden-media-form" method="post" action="<?= e(url('/admin/moderation/media/batch')) ?>" class="admin-inline-form admin-batch-bar">
+                        <?= csrf_field() ?>
+                        <button class="button button--small button--ghost" type="submit" name="action" value="show">批量恢复展示</button>
+                        <span class="muted">仅恢复「已隐藏」状态的媒体。</span>
+                    </form>
                     <div class="admin-table-wrap">
                         <table class="admin-table">
-                            <thead><tr><th>文件</th><th>纪念馆</th><th>说明</th><th>状态</th><th>操作</th></tr></thead>
+                            <thead><tr><th class="admin-col-check">选</th><th>文件</th><th>纪念馆</th><th>说明</th><th>状态</th><th>操作</th></tr></thead>
                             <tbody>
                             <?php foreach ($hiddenMedia as $media): ?>
                                 <tr>
+                                    <td><input type="checkbox" name="ids[]" value="<?= (int) $media['id'] ?>" form="batch-hidden-media-form" aria-label="选择媒体 <?= (int) $media['id'] ?>"></td>
                                     <td>
                                         <strong><?= e($media['original_name']) ?></strong>
                                         <p class="muted"><?= e($mediaKinds[$media['kind']] ?? $media['kind']) ?></p>
@@ -157,12 +180,18 @@ $mediaKinds = ['photo' => '照片', 'video' => '视频', 'audio' => '音频', 'd
                 <?php if ($recentMedia === []): ?>
                     <p class="admin-empty">暂无媒体。</p>
                 <?php else: ?>
+                    <form id="batch-recent-media-form" method="post" action="<?= e(url('/admin/moderation/media/batch')) ?>" class="admin-inline-form admin-batch-bar">
+                        <?= csrf_field() ?>
+                        <button class="button button--small button--ghost" type="submit" name="action" value="hide">批量隐藏</button>
+                        <span class="muted">仅隐藏「展示中」状态的媒体。</span>
+                    </form>
                     <div class="admin-table-wrap">
                         <table class="admin-table">
-                            <thead><tr><th>文件</th><th>纪念馆</th><th>说明</th><th>时间</th><th>操作</th></tr></thead>
+                            <thead><tr><th class="admin-col-check">选</th><th>文件</th><th>纪念馆</th><th>说明</th><th>时间</th><th>操作</th></tr></thead>
                             <tbody>
                             <?php foreach ($recentMedia as $media): ?>
                                 <tr>
+                                    <td><input type="checkbox" name="ids[]" value="<?= (int) $media['id'] ?>" form="batch-recent-media-form" aria-label="选择媒体 <?= (int) $media['id'] ?>"></td>
                                     <td>
                                         <strong><?= e($media['original_name']) ?></strong>
                                         <p class="muted"><?= e($mediaKinds[$media['kind']] ?? $media['kind']) ?></p>

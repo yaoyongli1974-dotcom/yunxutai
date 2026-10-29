@@ -148,6 +148,9 @@ $router->get('/admin/verifications/{id}/document', [AdminVerificationController:
 $router->post('/admin/verifications/{id}/review', [AdminVerificationController::class, 'review'], ['admin']);
 
 $router->get('/admin/moderation', [AdminModerationController::class, 'index'], ['admin']);
+$router->post('/admin/moderation/messages/batch', [AdminModerationController::class, 'messageBatch'], ['admin']);
+$router->post('/admin/moderation/articles/batch', [AdminModerationController::class, 'articleBatch'], ['admin']);
+$router->post('/admin/moderation/media/batch', [AdminModerationController::class, 'mediaBatch'], ['admin']);
 $router->post('/admin/moderation/messages/{id}', [AdminModerationController::class, 'messageStatus'], ['admin']);
 $router->post('/admin/moderation/articles/{id}', [AdminModerationController::class, 'articleStatus'], ['admin']);
 $router->post('/admin/moderation/media/{id}', [AdminModerationController::class, 'mediaStatus'], ['admin']);
