@@ -20,10 +20,10 @@ const REQUEST_TIMEOUT = 10000;
 
 /**
  * 微信登录开关：
- * 服务端配置 WX_APPID / WX_SECRET 并将 /auth/wechat 跑通后改为 true。
+ * 服务端已配置 WX_APPID / WX_SECRET 并通过 code2session 连通验证（appid/secret 有效）后置为 true。
  * 关闭时登录页的「微信登录」只提示「暂未配置」，ensureSession 在 401 后直接失败（demo 环境行为）。
  */
-const WECHAT_LOGIN_ENABLED = false;
+const WECHAT_LOGIN_ENABLED = true;
 
 module.exports = {
   BASE_URL: BASE_URL,

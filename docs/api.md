@@ -217,14 +217,22 @@ Authorization: Bearer <token>
 
 错误：
 
-- `503 wechat_not_configured`：服务端未配置 `WX_APPID` / `WX_SECRET`（**当前默认状态**）；
-- `401 unauthorized`：code 无效/已使用/过期，或 `code2session` 返回错误；
+- `503 wechat_not_configured`：服务端未配置 `WX_APPID` / `WX_SECRET`；
+- `501 wechat_exchange_failed`：code 无效/已使用/过期，或 `code2session` 返回错误（透传微信 errmsg）；
+- `503 service_unavailable`：微信服务暂时不可达；
 - `429 rate_limited`：换取过于频繁。
 
 权限：公开端点。
-来源：新增能力，web 端无对应页面；服务端 `code2session` → `openid` → 绑定/创建 `users` 记录。
+来源：新增能力，web 端无对应页面；服务端 `code2session` → `openid` → 查/建绑定：
 
-> **现状：code2session 待配置。** 未设置 `WX_APPID`/`WX_SECRET` 时该端点固定返回 503。小程序骨架通过 `config.js` 的 `WECHAT_LOGIN_ENABLED=false` 让登录页按钮提示「暂未配置」，避免无意义请求。上线前必须完成微信开放平台配置与真机联调。
+1. 首次登录在 `wx_identities` 表绑定 `openid ↔ user_id`（UNIQUE），并自动创建用户：
+   合成邮箱 `wx-<md5(openid)>@wx.local`、随机不可用密码（无法用邮箱密码登录）、
+   展示名「微信用户 + openid 摘要后 6 位」；
+2. 再次登录按 openid 定位既有用户并更新 `last_login_at`，unionid 后到则回填。
+
+> **状态：已配置并验证连通。** `WX_APPID`/`WX_SECRET` 已在服务端 `.env` 配置（secret 不进仓库），
+> code2session 已用假 code 验证返回 `40029 invalid code`（凭据有效、网络可达）。
+> 小程序 `config.js` 的 `WECHAT_LOGIN_ENABLED=true`。剩余动作：真机 `wx.login` 联调；如更换服务器出口 IP，需在公众号后台更新 IP 白名单（否则 `40164`）。
 
 ### 5.3 `POST /auth/logout` — 注销
 
@@ -605,7 +613,7 @@ Authorization: Bearer <token>
 ## 12. 上线检查清单
 
 - [ ] `BASE_URL` 改为 HTTPS 域名；在微信公众平台「开发管理 → 服务器域名」配置 `request` 合法域名（不能带路径/端口，必须 HTTPS 且证书有效）。
-- [ ] 服务端配置 `WX_APPID` / `WX_SECRET`，`code2session` 联调通过；secret 只存在服务端环境变量，不写日志、不进仓库。
+- [x] 服务端配置 `WX_APPID` / `WX_SECRET`，code2session 已用假 code 验证凭据有效（40029 预期拒绝）；secret 只存在服务端环境变量，不写日志、不进仓库。真机 `wx.login` 联调仍待进行。
 - [ ] 真机验证登录、token 过期（401）与重新登录、`wx.checkSession` 续期路径。
 - [ ] 私密/暂停/未核验纪念馆的 404 行为在真机验证；确认没有通过错误码或响应差异泄露馆是否存在。
 - [ ] 签名 `media_url` 900 秒有效期可接受；页面停留超时后重新拉详情，不缓存过期 URL。
@@ -617,7 +625,7 @@ Authorization: Bearer <token>
 
 ## 13. 当前限制与后续扩展
 
-- **code2session 待配置**：未设置 `WX_APPID`/`WX_SECRET` 时 `POST /auth/wechat` 返回 `503 wechat_not_configured`；小程序登录页按钮提示「暂未配置」。
+- **code2session 状态**：凭据已配置并验证连通（见 5.2 节）；未配置/凭据失效时该端点返回 `503 wechat_not_configured`；小程序登录页按钮提示「暂未配置」。
 - **未覆盖的 web 能力**：媒体上传、馆内编辑/审核、举报、AI 工作室、身份核验材料提交仍只在 web 端；如需小程序化，按同一 `Policy` 规则扩展，不新增平行权限逻辑。
 - **分页/字段微调**：列表信封与详情字段以服务端实现为准，联调后同步本文与 `miniprogram/utils/api.js`。
 - **契约差异提示**：祭奠附言在 API 使用 `appendix`，web 表单与数据表使用 `note`；申领理由 API 使用 `reason`，数据表为 `claims.statement`。服务端负责映射，客户端只按本文传参。
