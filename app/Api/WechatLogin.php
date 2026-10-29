@@ -9,16 +9,9 @@ use App\Core\Db;
 /**
  * 微信小程序登录（jscode2session 换 openid）。
  *
- * pending-migration:
- *   users 表当前没有 openid 列，也没有独立的第三方身份表，schema 由 Lane A 持有，
- *   API Lane 不得自行改库。因此本服务在成功换到 openid 后**不会**生成任何
- *   `wx_{sha1}@...` 之类的合成邮箱占位账号，而是明确返回 503
- *   `wechat_not_configured: openid 持久化待迁移`。
- *
- *   真实启用前需要新增（由 schema 的所有者处理）：
- *     wx_identities(id, openid UNIQUE, unionid, user_id, created_at, last_login_at)
- *   或给 users 增加 openid 列；随后在 self::userIdForOpenid() 中接入即可，
- *   控制器的响应结构无需改动。
+ * openid 持久化：`wx_identities` 表绑定 openid ↔ users。
+ * 首次登录自动创建账号：合成邮箱 `wx-<hash>@wx.local`（不可用密码，仅可通过
+ * 微信登录进入），display_name 取 '微信用户' + openid 摘要后 6 位。
  *
  * 配置读取顺序：config('wechat.appid'|'wechat.secret') → 环境变量 WX_APPID/WX_SECRET。
  */
@@ -26,6 +19,9 @@ final class WechatLogin
 {
     private const ENDPOINT = 'https://api.weixin.qq.com/sns/jscode2session';
     private const TIMEOUT = 5;
+
+    /** 最近一次 jscode2session 返回的 unionid（可能为空）。 */
+    private static string $lastUnionid = '';
 
     /**
      * @return array{token:string, expires_at:string, user:array}
@@ -37,11 +33,7 @@ final class WechatLogin
         }
 
         $openid = self::exchangeOpenid($code);
-        $userId = self::userIdForOpenid($openid);
-        if ($userId === null) {
-            // pending-migration：openid 无处落库（见类注释）。接入 wx_identities 后此处改为查/建用户。
-            throw new ApiException('wechat_not_configured', 'openid 持久化待迁移', 503);
-        }
+        $userId = self::ensureIdentity($openid, self::$lastUnionid);
 
         $user = Db::fetch('SELECT * FROM users WHERE id = ? AND status = ? LIMIT 1', [$userId, 'active']);
         if ($user === null) {
@@ -106,24 +98,80 @@ final class WechatLogin
         if ($openid === '') {
             throw new ApiException('wechat_exchange_failed', '微信未返回 openid', 501);
         }
+        self::$lastUnionid = trim((string) ($payload['unionid'] ?? ''));
         return $openid;
     }
 
     /**
-     * pending-migration：目前恒为 null（users 无 openid 列）。
-     * 若后续 schema 增加 users.openid，这里会自动识别并查用户。
+     * 查询或创建 openid 绑定，返回 user_id。
+     * 首次登录自动建号：合成邮箱 + 不可用密码，只能经微信登录进入。
+     *
+     * @return int 用户 ID
      */
-    private static function userIdForOpenid(string $openid): ?int
+    public static function ensureIdentity(string $openid, string $unionid = ''): int
     {
-        $hasColumn = (bool) Db::value(
-            "SELECT 1 FROM information_schema.COLUMNS
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'openid' LIMIT 1"
+        $openid = trim($openid);
+        if ($openid === '') {
+            throw new ApiException('wechat_exchange_failed', '微信未返回 openid', 501);
+        }
+        $unionid = trim($unionid) ?: null;
+
+        $existing = Db::fetch(
+            'SELECT id, user_id, unionid FROM wx_identities WHERE openid = ? LIMIT 1',
+            [$openid]
         );
-        if (!$hasColumn) {
-            return null;
+        if ($existing !== null) {
+            if ($unionid !== null && $unionid !== ($existing['unionid'] ?? null)) {
+                Db::query(
+                    'UPDATE wx_identities SET last_login_at = CURRENT_TIMESTAMP, unionid = ? WHERE id = ?',
+                    [$unionid, (int) $existing['id']]
+                );
+            } else {
+                Db::query(
+                    'UPDATE wx_identities SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?',
+                    [(int) $existing['id']]
+                );
+            }
+            return (int) $existing['user_id'];
         }
 
-        $id = Db::value('SELECT id FROM users WHERE openid = ? LIMIT 1', [$openid]);
-        return $id === null ? null : (int) $id;
+        $email = self::syntheticEmail($openid);
+        $displayName = '微信用户' . substr(md5($openid), -6);
+        $unusableHash = password_hash(bin2hex(random_bytes(24)), PASSWORD_DEFAULT);
+
+        try {
+            return (int) Db::transaction(function () use ($openid, $unionid, $email, $displayName, $unusableHash) {
+                $raced = Db::fetch('SELECT user_id FROM wx_identities WHERE openid = ? LIMIT 1', [$openid]);
+                if ($raced !== null) {
+                    return (int) $raced['user_id'];
+                }
+                $userId = Db::insert('users', [
+                    'email' => $email,
+                    'password_hash' => $unusableHash,
+                    'display_name' => $displayName,
+                    'role' => 'user',
+                    'status' => 'active',
+                    'last_login_at' => date('Y-m-d H:i:s'),
+                ]);
+                Db::insert('wx_identities', [
+                    'user_id' => $userId,
+                    'openid' => $openid,
+                    'unionid' => $unionid,
+                    'provider' => 'miniapp',
+                    'last_login_at' => date('Y-m-d H:i:s'),
+                ]);
+                return $userId;
+            });
+        } catch (Throwable $e) {
+            throw new \RuntimeException('微信登录账号创建失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 合成邮箱：wx-<md5(openid)>@wx.local，稳定、唯一、不与真实邮箱冲突。
+     */
+    public static function syntheticEmail(string $openid): string
+    {
+        return 'wx-' . md5($openid) . '@wx.local';
     }
 }

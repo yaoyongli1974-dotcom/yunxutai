@@ -35,6 +35,20 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     CONSTRAINT fk_api_tokens_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS wx_identities (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id BIGINT UNSIGNED NOT NULL,
+    openid VARCHAR(64) NOT NULL,
+    unionid VARCHAR(64) DEFAULT NULL,
+    provider VARCHAR(20) NOT NULL DEFAULT 'miniapp',
+    last_login_at DATETIME DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_wx_identities_openid (openid),
+    KEY idx_wx_identities_user (user_id),
+    CONSTRAINT fk_wx_identities_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS deceased (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     full_name VARCHAR(120) NOT NULL,

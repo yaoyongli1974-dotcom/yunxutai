@@ -66,7 +66,7 @@ final class AuthController extends BaseController
 
     /**
      * POST /api/v1/auth/wechat — 小程序静默登录。
-     * 逻辑全部封装在 App\Api\WechatLogin（含 pending-migration 说明）。
+     * 逻辑全部封装在 App\Api\WechatLogin（openid→wx_identities 落库与建号）。
      */
     public function wechat(Request $request): Response
     {

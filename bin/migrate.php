@@ -205,6 +205,23 @@ try {
     );
     echo "✓ api_tokens 表已就绪\n";
 
+    Db::query(
+        "CREATE TABLE IF NOT EXISTS wx_identities (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            user_id BIGINT UNSIGNED NOT NULL,
+            openid VARCHAR(64) NOT NULL,
+            unionid VARCHAR(64) DEFAULT NULL,
+            provider VARCHAR(20) NOT NULL DEFAULT 'miniapp',
+            last_login_at DATETIME DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_wx_identities_openid (openid),
+            KEY idx_wx_identities_user (user_id),
+            CONSTRAINT fk_wx_identities_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    echo "✓ wx_identities 表已就绪（openid ↔ 用户绑定）\n";
+
     if ($wasVerificationColumnMissing || $forceGrandfather) {
         if ($forceGrandfather) {
             $affected = Db::query(
