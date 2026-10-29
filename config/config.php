@@ -26,6 +26,11 @@ return [
         'password' => getenv('DB_PASSWORD') ?: '',
         'charset'  => 'utf8mb4',
     ],
+    'kv' => [
+        // 留空 = MySQL throttle 表 + PHP 文件会话（单机默认）；配置后启用 Redis 限流与共享会话。
+        'redis_url'   => trim((string) (getenv('REDIS_URL') ?: '')),
+        'rate_driver' => getenv('RATE_DRIVER') ?: 'mysql',
+    ],
     'security' => [
         'session_name'       => 'jingsi_session',
         'login_max_attempts' => 5,

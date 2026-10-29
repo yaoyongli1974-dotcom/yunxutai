@@ -55,6 +55,16 @@ if (PHP_SAPI !== 'cli') {
     ini_set('session.use_strict_mode', '1');
     ini_set('session.use_only_cookies', '1');
     ini_set('session.cookie_httponly', '1');
+
+    // 多实例部署可选：配置 REDIS_URL 后改用 Redis 共享会话；留空时仍使用 PHP 默认文件存储。
+    $redisUrl = trim((string) config('kv.redis_url', ''));
+    if ($redisUrl !== '') {
+        session_set_save_handler(
+            new \App\Core\Kv\RedisSessionHandler(new \App\Core\Kv\RespClient($redisUrl)),
+            true
+        );
+    }
+
     session_start();
 
     header('X-Content-Type-Options: nosniff');

@@ -7,41 +7,29 @@ final class RateLimiter
 {
     /**
      * 记录一次计数；返回 true 表示仍然允许，false 表示已超限。
+     *
+     * 公开 API 与语义保持与 MySQL throttle 版本一致：已超限时不再累加计数。
+     * 存储驱动由 Kv::counter() 决定（Redis 或 MySQL），哈希仍由本类统一完成。
      */
     public static function hit(string $key, int $max, int $windowSeconds): bool
     {
         $key = hash('sha256', $key);
-        $now = time();
+        $counter = Kv::counter();
 
-        $row = Db::fetch('SELECT hits, reset_at FROM throttle WHERE throttle_key = ?', [$key]);
-        if ($row === null || strtotime((string) $row['reset_at']) <= $now) {
-            Db::query(
-                'REPLACE INTO throttle (throttle_key, hits, reset_at) VALUES (?, 1, ?)',
-                [$key, date('Y-m-d H:i:s', $now + $windowSeconds)]
-            );
-            return true;
-        }
-
-        if ((int) $row['hits'] >= $max) {
+        if ($counter->count($key) >= $max) {
             return false;
         }
 
-        Db::query('UPDATE throttle SET hits = hits + 1 WHERE throttle_key = ?', [$key]);
-        return true;
+        return $counter->increment($key, $windowSeconds) <= $max;
     }
 
     public static function blocked(string $key, int $max): bool
     {
-        $key = hash('sha256', $key);
-        $row = Db::fetch('SELECT hits, reset_at FROM throttle WHERE throttle_key = ?', [$key]);
-        if ($row === null || strtotime((string) $row['reset_at']) <= time()) {
-            return false;
-        }
-        return (int) $row['hits'] >= $max;
+        return Kv::counter()->count(hash('sha256', $key)) >= $max;
     }
 
     public static function clear(string $key): void
     {
-        Db::query('DELETE FROM throttle WHERE throttle_key = ?', [hash('sha256', $key)]);
+        Kv::counter()->reset(hash('sha256', $key));
     }
 }

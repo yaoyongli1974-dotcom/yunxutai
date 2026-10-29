@@ -27,7 +27,7 @@
 |---|---|---|
 | 运行时 | PHP 8.4+（目标 8.5） | 无 Composer 依赖，`declare(strict_types=1)` |
 | 数据库 | MySQL 8.4 LTS / MariaDB 11+ | `utf8mb4`，InnoDB，PDO 预处理 |
-| 会话/限流 | PHP 原生 session + MySQL `throttle` 表 | 单机即可运行；多机部署见「扩展」 |
+| 会话/限流 | PHP 原生 session + MySQL `throttle` 表 | 单机即可运行；配置 `REDIS_URL` 后限流与会话改存 Redis（多实例） |
 | 文件 | 本地 `storage/uploads` | 通过 `/media/{id}` 鉴权输出；可替换对象存储 |
 | 前端 | 服务端模板 + 原生 CSS/JS | PC/H5 响应式；无外部 CDN |
 
@@ -184,7 +184,7 @@ docs/              架构、部署、安全、合规
 
 ## 扩展路线
 
-- Redis：替换 session 与 `RateLimiter` 存储，支持多实例。
+- Redis：已完成——限流计数与会话支持 `REDIS_URL` 切换到 Redis（纯 PHP RESP 客户端，无需扩展），见 [docs/deployment.md](docs/deployment.md) 第 8 节。
 - 对象存储：将 `Storage` 替换为 S3/OSS 适配器，媒体仍经签名 URL 或应用代理鉴权。
 - 邮件/短信：邀请、举报处理、数据请求状态通知。
 - 付费服务：订单、合同、发票与交付流程（不得售卖虚拟祭品或影响纪念公平性）。

@@ -11,7 +11,13 @@ define('BASE_PATH', dirname(__DIR__));
 require BASE_PATH . '/app/bootstrap.php';
 
 use App\Core\Db;
+use App\Core\Kv;
+use App\Core\Kv\MysqlCounter;
+use App\Core\Kv\RedisCounter;
+use App\Core\Kv\RedisSessionHandler;
+use App\Core\Kv\RespClient;
 use App\Core\Policy;
+use App\Core\RateLimiter;
 use App\Core\Storage;
 use App\Core\Str;
 use App\Core\Validator;
@@ -21,6 +27,8 @@ use App\Models\Memorial;
 use App\Models\Report;
 use App\Models\Tribute;
 use App\Models\Verification;
+
+require BASE_PATH . '/tests/Support/MockRespServer.php';
 
 $baseUrl = rtrim((string) (getenv('BASE_URL') ?: 'http://127.0.0.1:8110'), '/');
 $cookieJar = sys_get_temp_dir() . '/jingsi-test-cookies-' . getmypid() . '.txt';
@@ -1172,6 +1180,141 @@ test('成员管理：馆主查看/邀请/角色/移除/作废', function (): voi
         if ($familyMemberId > 0) {
             Db::query("UPDATE memorial_members SET status = 'active', role = 'editor' WHERE id = ?", [$familyMemberId]);
         }
+    }
+});
+
+echo "\n[KV 与 Redis]\n";
+
+test('RESP 客户端错误响应抛出 RuntimeException', function (): void {
+    $server = new MockRespServer();
+    $client = new RespClient($server->url(), static fn (): mixed => $server->pump());
+    try {
+        check($client->command('PING') === 'PONG', 'PING 应返回 PONG');
+        $threw = false;
+        try {
+            $client->command('NOSUCH');
+        } catch (RuntimeException $e) {
+            $threw = true;
+            check_contains($e->getMessage(), 'Redis 错误', '错误响应应带 Redis 错误前缀');
+        }
+        check($threw, '服务端错误响应应抛出 RuntimeException');
+    } finally {
+        $client->close();
+        $server->close();
+    }
+});
+
+test('RedisCounter 计数/TTL/重置（mock Redis）', function (): void {
+    $server = new MockRespServer();
+    $client = new RespClient($server->url(), static fn (): mixed => $server->pump());
+    try {
+        $counter = new RedisCounter($client, 'test:counter:');
+
+        check($counter->count('alpha') === 0, '未命中计数应为 0');
+        check($counter->increment('alpha', 60) === 1, '首次计数应为 1');
+        check($counter->increment('alpha', 60) === 2, '第二次计数应为 2');
+        check($counter->count('alpha') === 2, 'GET 应返回当前计数 2');
+
+        $ttl = $counter->ttl('alpha');
+        check($ttl > 0 && $ttl <= 60, 'TTL 应落在 60 秒窗口内');
+
+        $commands = $server->commands();
+        $incr = array_values(array_filter($commands, static fn (array $c): bool => strtoupper($c[0]) === 'INCR'));
+        $expire = array_values(array_filter($commands, static fn (array $c): bool => strtoupper($c[0]) === 'EXPIRE'));
+        check(count($incr) === 2, '应收到两次 INCR');
+        check(count($expire) === 1, '只有首次计数应 EXPIRE，避免窗口被反复续期');
+
+        $counter->reset('alpha');
+        check($counter->count('alpha') === 0, 'DEL 后计数应归零');
+        check($counter->ttl('alpha') === -1, '不存在的键 TTL 应为 -1');
+    } finally {
+        $client->close();
+        $server->close();
+    }
+});
+
+test('RedisSessionHandler 读写销毁往返（mock Redis）', function (): void {
+    $server = new MockRespServer();
+    $client = new RespClient($server->url(), static fn (): mixed => $server->pump());
+    try {
+        $handler = new RedisSessionHandler($client, 'test:session:');
+        $payload = 'uid|i:42;name|s:9:"静思园测试";';
+
+        check($handler->open(sys_get_temp_dir(), 'PHPSESSID') === true, 'open 应为 true');
+        check($handler->write('abc123', $payload) === true, 'write 应为 true');
+        check($handler->read('abc123') === $payload, 'read 应原样返回会话数据');
+
+        $setex = array_values(array_filter(
+            $server->commands(),
+            static fn (array $c): bool => strtoupper($c[0]) === 'SETEX'
+        ));
+        check(count($setex) === 1, '会话写入应使用 SETEX');
+        $expectedTtl = max(1, (int) (ini_get('session.gc_maxlifetime') ?: 1440));
+        check((int) ($setex[0][2] ?? 0) === $expectedTtl, 'SETEX TTL 应等于 session.gc_maxlifetime');
+
+        check($handler->destroy('abc123') === true, 'destroy 应为 true');
+        check($handler->read('abc123') === '', '销毁后 read 应返回空串');
+        check($handler->gc(1440) === 0, 'gc 应为无副作用返回 0');
+        check($handler->close() === true, 'close 应为 true');
+    } finally {
+        $client->close();
+        $server->close();
+    }
+});
+
+test('RateLimiter Redis 驱动语义一致', function (): void {
+    $server = new MockRespServer();
+    $client = new RespClient($server->url(), static fn (): mixed => $server->pump());
+    Kv::setCounter(new RedisCounter($client, 'test:rate:'));
+
+    $key = 'kv-rate-redis-' . getmypid();
+    try {
+        check(RateLimiter::hit($key, 3, 60) === true, '第 1 次应允许');
+        check(RateLimiter::hit($key, 3, 60) === true, '第 2 次应允许');
+        check(RateLimiter::hit($key, 3, 60) === true, '第 3 次应允许');
+        check(RateLimiter::hit($key, 3, 60) === false, '第 4 次应被阻止');
+        check(RateLimiter::blocked($key, 3) === true, '连续命中后应处于阻止状态');
+
+        RateLimiter::clear($key);
+        check(RateLimiter::blocked($key, 3) === false, 'clear 后应恢复');
+    } finally {
+        Kv::setCounter(null);
+        Kv::reset();
+        $client->close();
+        $server->close();
+    }
+});
+
+test('RateLimiter MySQL 驱动回归', function (): void {
+    Kv::setCounter(new MysqlCounter());
+    $key = 'kv-rate-mysql-' . getmypid();
+
+    try {
+        check(RateLimiter::hit($key, 3, 60) === true, '第 1 次应允许');
+        check(RateLimiter::hit($key, 3, 60) === true, '第 2 次应允许');
+        check(RateLimiter::hit($key, 3, 60) === true, '第 3 次应允许');
+        check(RateLimiter::hit($key, 3, 60) === false, '第 4 次应被阻止');
+        check(RateLimiter::blocked($key, 3) === true, '连续命中后应处于阻止状态');
+
+        RateLimiter::clear($key);
+        check(RateLimiter::blocked($key, 3) === false, 'clear 后应恢复');
+    } finally {
+        RateLimiter::clear($key);
+        Kv::setCounter(null);
+        Kv::reset();
+    }
+});
+
+test('无 REDIS_URL 时驱动回退 MySQL', function (): void {
+    $saved = $GLOBALS['config']['kv']['redis_url'] ?? '';
+    $GLOBALS['config']['kv']['redis_url'] = '';
+    Kv::reset();
+
+    try {
+        check(Kv::counter() instanceof MysqlCounter, '未配置 Redis 时应使用 MySQL 驱动');
+    } finally {
+        $GLOBALS['config']['kv']['redis_url'] = $saved;
+        Kv::reset();
     }
 });
 

@@ -176,6 +176,45 @@ if (config('ai.enabled')) {
     warn('AI 工作室未启用（可选）：设置 AI_ENABLED=true 后可用');
 }
 
+$redisUrl = trim((string) config('kv.redis_url', ''));
+if ($redisUrl !== '') {
+    $redisClient = null;
+    try {
+        $redisClient = new \App\Core\Kv\RespClient($redisUrl);
+        $pong = $redisClient->command('PING');
+        if ($pong === 'PONG') {
+            ok('Redis 连接正常（PING）');
+        } else {
+            warn('Redis PING 返回异常：' . var_export($pong, true));
+        }
+    } catch (\Throwable $e) {
+        warn('Redis 连接失败：' . $e->getMessage() . '（限流与会话将不可用）');
+    }
+
+    if ($redisClient !== null) {
+        $probeKey = 'jingsi:doctor:' . bin2hex(random_bytes(6));
+        try {
+            $redisClient->command('SETEX', $probeKey, '10', 'ok');
+            $probeValue = $redisClient->command('GET', $probeKey);
+            if ($probeValue === 'ok') {
+                ok('Redis 键值读写正常');
+            } else {
+                warn('Redis 键值读写异常：SETEX/GET 结果不一致');
+            }
+        } catch (\Throwable $e) {
+            warn('Redis 键值读写失败：' . $e->getMessage());
+        } finally {
+            try {
+                $redisClient->command('DEL', $probeKey);
+            } catch (\Throwable $e) {
+                // 清理失败不追加警告，避免自检输出噪音。
+            }
+        }
+    } else {
+        warn('Redis 键值读写检查已跳过：连接不可用');
+    }
+}
+
 echo "\n通过：" . count($oks) . "\n";
 foreach ($oks as $item) {
     echo "  ✓ {$item}\n";

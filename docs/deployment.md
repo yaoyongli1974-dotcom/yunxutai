@@ -138,8 +138,8 @@ tar xzf verifications.tar.gz -C storage
 
 当前 MVP 默认单机：
 
-- Session 存本机；多实例需改为 Redis 或数据库 session。
-- `RateLimiter` 存 MySQL，多实例可共享；高并发建议 Redis。
+- **限流计数**：默认存 MySQL `throttle` 表；配置 `REDIS_URL=redis://[:密码@]host:port/[db]` 后自动切换到 Redis（`app/Core/Kv`，纯 PHP RESP 客户端，不依赖 redis 扩展），多实例共享窗口。`php bin/doctor.php` 会在配置后自动检查连通性；Redis 不可用时限流功能降级（医师自检给出警告），应用整体不阻断。
+- **会话**：已配置 `REDIS_URL` 时会话经 `RedisSessionHandler` 存入 Redis（键 `jingsi:session:<sid>`，TTL 跟随 `session.gc_maxlifetime`）；留空时仍是 PHP 文件会话。多实例部署必须共享同一 `REDIS_URL` 与同一 `APP_KEY`。
 - 媒体存本地磁盘；多实例需共享存储或对象存储。替换 `App\Core\Storage` 并保持 `MediaController` 鉴权逻辑。
 - 定时任务目前只有备份；数据留存清理、通知重试需接入队列/计划任务。
 
