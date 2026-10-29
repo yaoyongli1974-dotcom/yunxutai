@@ -157,6 +157,10 @@ tar xzf verifications.tar.gz -C storage
 
 备份应加密并异地保存；包含个人信息与逝者资料，访问需授权与审计。
 
+### 演练记录
+
+- 2026-10-29（本地开发库）：`php bin/backup.php` 产物含 database.sql.gz / uploads.tar.gz / verifications.tar.gz / manifest.json；dump 含全部扩展表（api_tokens、wx_identities、memorial_verifications、ai_*）与 totp 列。恢复演练：空库 `jidian_restore` 导入后 users/memorials/messages/api_tokens/wx_identities 行数与源库一致，校验后删除。生产态模拟（APP_ENV=production、APP_DEBUG=false、HTTPS URL）：`bin/doctor.php` 22 项全部通过；仅余「SMTP 未配置」「cookie_secure 未开启」两条，均有样例配置对应（`deploy/php.ini` 的 `session.cookie_secure=1`，SMTP 凭据属运营侧），非代码缺陷。
+
 ## 7. 日志与监控
 
 - 应用错误：PHP-FPM `error_log`；应用审计：`audit_logs`。
