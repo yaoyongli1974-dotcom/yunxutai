@@ -30,6 +30,15 @@ final class Auth
         return self::$user;
     }
 
+    /**
+     * 由 API 认证层（如 ApiAuth::resolve()）注入用户，后续 Auth::user() 直接返回该用户。
+     */
+    public static function setApiUser(?array $user): void
+    {
+        self::$user = $user;
+        self::$resolved = true;
+    }
+
     public static function check(): bool
     {
         return self::user() !== null;

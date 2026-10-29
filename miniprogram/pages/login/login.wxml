@@ -1,0 +1,40 @@
+<view class="page">
+  <view class="brand">
+    <text class="brand-title">静思园</text>
+    <text class="brand-sub">记取来时路，安放未尽言</text>
+  </view>
+
+  <view class="form">
+    <view class="field">
+      <text class="label">邮箱</text>
+      <input
+        class="input"
+        type="text"
+        value="{{email}}"
+        placeholder="demo@example.com"
+        bindinput="onEmailInput"
+      />
+    </view>
+
+    <view class="field">
+      <text class="label">密码</text>
+      <input
+        class="input"
+        password="{{true}}"
+        value="{{password}}"
+        placeholder="请输入密码"
+        bindinput="onPasswordInput"
+      />
+    </view>
+
+    <button class="btn primary" loading="{{loading}}" disabled="{{loading}}" bindtap="onLoginTap">
+      登录
+    </button>
+
+    <button class="btn ghost" disabled="{{loading}}" bindtap="onWechatTap">
+      微信登录
+    </button>
+
+    <text class="hint">{{wechatHint}}</text>
+  </view>
+</view>

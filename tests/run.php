@@ -62,6 +62,64 @@ function check_not_contains(string $haystack, string $needle, string $message = 
 }
 
 /**
+ * API 请求助手：JSON body + Bearer token，返回解析后的数组。
+ * 使用独立 cookie jar，避免继承 web 测试的会话状态（API 客户端应只依赖 Bearer token）。
+ * @param array<string,mixed>|null $json
+ * @return array{status:int,data:mixed,raw:string}
+ */
+function api(string $method, string $path, ?array $json = null, ?string $token = null): array
+{
+    global $baseUrl;
+    static $apiCookieJar = null;
+    $apiCookieJar ??= sys_get_temp_dir() . '/jingsi-test-api-cookies-' . getmypid() . '.txt';
+
+    $command = [
+        'curl', '-sS', '--max-time', '25',
+        '-b', $apiCookieJar, '-c', $apiCookieJar,
+        '-X', $method,
+        '-H', 'Accept: application/json',
+        '-H', 'Content-Type: application/json',
+        '-w', "\n__STATUS__%{http_code}",
+    ];
+    if ($token !== null) {
+        $command[] = '-H';
+        $command[] = 'Authorization: Bearer ' . $token;
+    }
+    if ($json !== null) {
+        $command[] = '--data';
+        $command[] = json_encode($json, JSON_UNESCAPED_UNICODE);
+    }
+    $command[] = $baseUrl . $path;
+
+    $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+    $process = proc_open($command, $descriptors, $pipes);
+    if (!is_resource($process)) {
+        fwrite(STDERR, "无法启动 curl\n");
+        exit(1);
+    }
+    $body = stream_get_contents($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    proc_close($process);
+    if ($stderr !== '' && trim($stderr) !== '') {
+        fwrite(STDERR, 'curl: ' . trim($stderr) . "\n");
+    }
+    if (!preg_match('/__STATUS__(\d+)\s*$/', (string) $body, $m)) {
+        return ['status' => 0, 'data' => null, 'raw' => (string) $body];
+    }
+    $raw = trim(substr((string) $body, 0, -strlen($m[0])));
+    $decoded = json_decode($raw, true);
+    return ['status' => (int) $m[1], 'data' => $decoded, 'raw' => $raw];
+}
+
+/** 从 API 响应中提取 Bearer token */
+function api_token_of(array $response): string
+{
+    return (string) ($response['data']['data']['token'] ?? '');
+}
+
+/**
  * @param array<string, string>|null $form
  * @param array<string, string> $files
  * @return array{status:int,body:string,headers:string,location:string,url:string}
@@ -841,6 +899,149 @@ test('非法文件类型被拒绝', function (): void {
     @unlink($badFile);
     check($response['status'] === 200, '请求应返回页面');
     check(db_count('media') === $before, '非法文件不应入库');
+});
+
+echo "\n[小程序 API]\n";
+
+test('API 登录与 401 错误包络', function (): void {
+    $bad = api('POST', '/api/v1/auth/token', ['email' => 'demo@example.com', 'password' => 'wrong-pass']);
+    check($bad['status'] === 401, '错误凭证应返回 401');
+    check(($bad['data']['error']['code'] ?? '') === 'unauthorized', '错误包络 code 应为 unauthorized');
+
+    $guest = api('GET', '/api/v1/me');
+    check($guest['status'] === 401, '未携带 token 访问 /me 应 401');
+    check(($guest['data']['error']['code'] ?? '') === 'unauthorized', '未鉴权错误码应为 unauthorized');
+
+    $ok = api('POST', '/api/v1/auth/token', ['email' => 'demo@example.com', 'password' => 'Demo@123456']);
+    check($ok['status'] === 200, '正确凭证应返回 200');
+    $GLOBALS['apiToken'] = api_token_of($ok);
+    check($GLOBALS['apiToken'] !== '', '应签发非空 token');
+    check(api_token_of($ok) === api_token_of($ok), 'token 应可提取');
+
+    $me = api('GET', '/api/v1/me', null, $GLOBALS['apiToken']);
+    check($me['status'] === 200, 'token 应可访问 /me');
+    check(str_ends_with((string) ($me['data']['data']['user']['email'] ?? ''), '@example.com'), '应返回（打码后的）用户邮箱');
+    $roles = array_column($me['data']['data']['memberships'] ?? [], 'role', 'slug');
+    check(($roles['zhang-mingyuan'] ?? '') === 'owner', '应含馆主角色成员身份');
+});
+
+test('API 列表与公开详情', function (): void {
+    $list = api('GET', '/api/v1/memorials');
+    check($list['status'] === 200, '公开列表应 200');
+    $slugs = array_column($list['data']['data']['items'] ?? [], 'slug');
+    check(in_array('zhang-mingyuan', $slugs, true), '列表应含公开可收录馆');
+    check(!in_array('memory-11bbb2ba', $slugs, true), '列表不应含私密馆');
+
+    $detail = api('GET', '/api/v1/memorials/zhang-mingyuan');
+    check($detail['status'] === 200, '公开馆详情应 200');
+    check(isset($detail['data']['data']['profile']['name']) || isset($detail['data']['data']['summary']), '详情应含档案字段');
+});
+
+test('私密馆对无权限请求 404', function (): void {
+    $guest = api('GET', '/api/v1/memorials/memory-11bbb2ba');
+    check($guest['status'] === 404, '访客访问私密馆应 404');
+    check(($guest['data']['error']['code'] ?? '') === 'not_found', '私密馆缺失应与其他 404 一致');
+});
+
+test('祭奠写入与留言待审', function (): void {
+    $token = $GLOBALS['apiToken'] ?? '';
+    if ($token === '') {
+        check(false, '前置：缺少可用 API token');
+        return;
+    }
+    $flower = api('POST', '/api/v1/memorials/zhang-mingyuan/tribute', ['type' => 'flower', 'appendix' => 'API 自检', 'anonymous' => true], $token);
+    check($flower['status'] === 200 && isset($flower['data']['data']['id']), '献花应成功');
+
+    $bad = api('POST', '/api/v1/memorials/zhang-mingyuan/tribute', ['type' => 'rocket'], $token);
+    check($bad['status'] === 422, '非法祭奠类型应 422');
+
+    $pending = api('POST', '/api/v1/memorials/zhang-mingyuan/message', ['body' => 'API 测试留言，请转公开后删除'], $token);
+    check(in_array($pending['status'], [200, 202], true), '留言应入库');
+    $GLOBALS['apiPendingMessage'] = $pending['data']['data']['message_id'] ?? null;
+
+    $guest = api('GET', '/api/v1/memorials/zhang-mingyuan/messages');
+    check($guest['status'] === 200, '留言簿应 200');
+    $bodies = json_encode($guest['data']['data']['items'] ?? [], JSON_UNESCAPED_UNICODE);
+    check(strpos((string) $bodies, 'API 测试留言') === false, '未登录留言簿不应含待审留言');
+});
+
+test('签名媒体：有效签名 200，篡改 404', function (): void {
+    $detail = api('GET', '/api/v1/memorials/zhang-mingyuan');
+    $media = $detail['data']['data']['media'] ?? [];
+    check($media !== [], '公开馆详情应含媒体');
+    $url = $media[0]['media_url'] ?? '';
+    check($url !== '' && str_contains($url, 'sig='), '媒体应返回签名 URL');
+
+    $valid = api('GET', $url);
+    check($valid['status'] === 200, '有效签名媒体应 200');
+
+    $tampered = api('GET', $url . 'x');
+    check($tampered['status'] === 404, '篡改签名应 404');
+
+    $stale = api('GET', preg_replace('/exp=\d+/', 'exp=1000000000', $url));
+    check($stale['status'] === 404, '过期签名应 404');
+});
+
+test('claim 提交与越权拒绝', function (): void {
+    // 演示数据为 claimant 预置了一条待处理申领：先临时移除，测完清理新建记录。
+    $seeded = Db::fetch(
+        "SELECT c.id FROM claims c JOIN users u ON u.id = c.user_id WHERE c.status = 'open' AND u.email = ?",
+        ['claimant@example.com']
+    );
+    $tokenUser = api_token_of(api('POST', '/api/v1/auth/token', ['email' => 'claimant@example.com', 'password' => 'Demo@123456']));
+    check($tokenUser !== '', '前置：普通用户应可登录');
+
+    if ($seeded !== null) {
+        Db::query('DELETE FROM claims WHERE id = ?', [$seeded['id']]);
+    }
+    try {
+        $claim = api('POST', '/api/v1/memorials/zhang-mingyuan/claim', ['relationship' => '亲属', 'reason' => '我是逝者亲属，申请加入纪念馆共同维护生平与照片，请平台核验。'], $tokenUser);
+        check($claim['status'] === 201, '申领应入库（201）');
+
+        $dup = api('POST', '/api/v1/memorials/zhang-mingyuan/claim', ['relationship' => '亲属', 'reason' => '我是逝者亲属，重复提交的第二条申领说明。'], $tokenUser);
+        check($dup['status'] === 422, '重复申领应 422');
+
+        $owner = api('POST', '/api/v1/memorials/zhang-mingyuan/claim', ['relationship' => '亲属', 'reason' => '我是馆主本人，再次提交申领不应被受理。'], $GLOBALS['apiToken'] ?? '');
+        check($owner['status'] === 422, '馆主重复申领应被拒绝');
+
+        $wrong = api('POST', '/api/v1/memorials/not-exist/claim', ['relationship' => '亲属', 'reason' => '一个不存在的纪念馆链接，提交申领应返回 404。'], $tokenUser);
+        check($wrong['status'] === 404, '不存在的馆申领应 404');
+    } finally {
+        // 测完清理：删除本用例新建的申领
+        Db::query("DELETE FROM claims WHERE status = 'open' AND user_id = (SELECT id FROM users WHERE email = ? LIMIT 1)", ['claimant@example.com']);
+    }
+});
+
+test('manage 创建一律私密草稿', function (): void {
+    $admin = api('POST', '/api/v1/auth/token', ['email' => 'admin@example.com', 'password' => 'TestAdmin@123']);
+    check($admin['status'] === 200, '前置：管理员应可登录');
+    $token = api_token_of($admin);
+    $before = db_count('memorials');
+    $created = api('POST', '/api/v1/manage/memorials', [
+        'full_name' => 'API 自检逝者',
+        'gender' => 'unknown',
+        'title' => 'API 自检纪念馆',
+        'visibility' => 'public', // 故意传公开，应被强制改写为 private
+    ], $token);
+    check($created['status'] === 201, '创建应成功');
+    check(db_count('memorials') === $before + 1, '应入库一馆');
+    $slug = (string) ($created['data']['data']['slug'] ?? '');
+    check($slug !== '', '应返回新馆 slug');
+    $row = Db::fetch('SELECT id, visibility, status FROM memorials WHERE slug = ?', [$slug]);
+    try {
+        check($row !== null, '应能查到新馆');
+        check(($row['visibility'] ?? '') === 'private' && ($row['status'] ?? '') !== 'published', 'API 创建不得直接公开');
+        $stranger = api('GET', '/api/v1/memorials/' . $slug);
+        check($stranger['status'] === 404, '未核验新馆对访客应 404');
+    } finally {
+        if ($row !== null) {
+            Db::query('DELETE FROM messages WHERE memorial_id = ?', [$row['id']]);
+            Db::query('DELETE FROM tributes WHERE memorial_id = ?', [$row['id']]);
+            Db::query('DELETE FROM memorial_members WHERE memorial_id = ?', [$row['id']]);
+            Db::query('DELETE FROM memorials WHERE id = ?', [$row['id']]);
+        }
+    }
+    check(db_count('memorials') === $before, '测试馆应清理干净');
 });
 
 echo "\n========== 结果 ==========\n";

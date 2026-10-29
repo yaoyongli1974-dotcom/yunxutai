@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * 幂等迁移：身份核验、举报优先级。
+ * 幂等迁移：身份核验、举报优先级、AI 任务表、小程序 API token。
  * 用法：php bin/migrate.php [--grandfather]
  *
  * 全新安装请直接使用 database/schema.sql（bin/install.php 已包含）。
@@ -187,6 +187,23 @@ try {
     );
     AiService::ensureDefaults();
     echo "✓ AI 服务与任务表已就绪\n";
+
+    Db::query(
+        "CREATE TABLE IF NOT EXISTS api_tokens (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            user_id BIGINT UNSIGNED NOT NULL,
+            token_hash CHAR(64) NOT NULL,
+            label VARCHAR(20) NOT NULL DEFAULT '',
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_used_at DATETIME DEFAULT NULL,
+            expires_at DATETIME DEFAULT NULL,
+            revoked_at DATETIME DEFAULT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_api_tokens_hash (token_hash),
+            CONSTRAINT fk_api_tokens_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    echo "✓ api_tokens 表已就绪\n";
 
     if ($wasVerificationColumnMissing || $forceGrandfather) {
         if ($forceGrandfather) {

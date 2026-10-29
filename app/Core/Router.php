@@ -93,6 +93,15 @@ final class Router
                 : (Auth::check()
                     ? throw new HttpException(403, '没有访问权限')
                     : Response::redirect('/login?next=' . rawurlencode($request->path))),
+            // API 认证：先解析 Bearer token；无 token 时保留会话回退能力。失败只返回 JSON，不跳转 HTML。
+            'api-auth' => (ApiAuth::resolve() !== null || Auth::check())
+                ? null
+                : Response::json(['error' => ['code' => 'unauthorized', 'message' => '请先登录']], 401),
+            'api-admin' => (ApiAuth::resolve() !== null || Auth::check())
+                ? (Auth::isAdmin()
+                    ? null
+                    : Response::json(['error' => ['code' => 'forbidden', 'message' => '没有访问权限']], 403))
+                : Response::json(['error' => ['code' => 'unauthorized', 'message' => '请先登录']], 401),
             default => throw new \RuntimeException('Unknown middleware: ' . $name),
         };
     }

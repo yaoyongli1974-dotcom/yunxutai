@@ -1,0 +1,74 @@
+page {
+  background: #f7f3ea;
+  color: #2f2a24;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 28rpx;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 96rpx 48rpx 64rpx;
+  box-sizing: border-box;
+}
+
+.brand {
+  margin-bottom: 72rpx;
+  text-align: center;
+}
+
+.brand-title {
+  display: block;
+  font-size: 56rpx;
+  letter-spacing: 12rpx;
+}
+
+.brand-sub {
+  display: block;
+  margin-top: 16rpx;
+  color: #8a7f70;
+  font-size: 24rpx;
+}
+
+.field {
+  margin-bottom: 32rpx;
+}
+
+.label {
+  display: block;
+  margin-bottom: 12rpx;
+  color: #6b6257;
+  font-size: 24rpx;
+}
+
+.input {
+  height: 88rpx;
+  padding: 0 24rpx;
+  background: #fffdf8;
+  border: 1rpx solid #e2d9c9;
+  border-radius: 12rpx;
+}
+
+.btn {
+  margin-top: 24rpx;
+  border-radius: 12rpx;
+}
+
+.btn.primary {
+  background: #3f5a4c;
+  color: #fff;
+}
+
+.btn.ghost {
+  background: transparent;
+  border: 1rpx solid #3f5a4c;
+  color: #3f5a4c;
+}
+
+.hint {
+  display: block;
+  margin-top: 40rpx;
+  color: #9a8f80;
+  font-size: 22rpx;
+  line-height: 1.7;
+  text-align: center;
+}

@@ -1,0 +1,10 @@
+.form {
+  padding: 40rpx 32rpx 48rpx;
+  background: #fffdf8;
+  border: 1rpx solid #e6ddcd;
+  border-radius: 20rpx;
+}
+
+.btn.primary {
+  margin-top: 48rpx;
+}

@@ -122,7 +122,7 @@ chmod +x bin/test.sh
 ./bin/test.sh
 ```
 
-覆盖：schema、密码策略、纪念馆权限、公开页面与 sitemap、未登录/越权访问、管理员、注册验证码、祭奠与留言审核、XSS 转义、私密馆与成员媒体鉴权、草稿隔离、举报、非法上传、身份核验、媒体可见性切换、AI 四项任务与运营改价。
+覆盖：schema、密码策略、纪念馆权限、公开页面与 sitemap、未登录/越权访问、管理员、注册验证码、祭奠与留言审核、XSS 转义、私密馆与成员媒体鉴权、草稿隔离、举报、非法上传、身份核验、媒体可见性切换、AI 四项任务与运营改价、小程序 API（token 登录、公开列表/详情、私密馆 404、祭奠与留言、签名媒体鉴权、申领与重复提交、manage 创建强制私密）。
 
 ## 目录结构
 
@@ -190,6 +190,21 @@ docs/              架构、部署、安全、合规
 - 付费服务：订单、合同、发票与交付流程（不得售卖虚拟祭品或影响纪念公平性）。
 - 小程序：复用同一套 API/权限策略，新增 JSON 接口层。
 - 管理端增强：双因素认证、细粒度管理员角色、批量审核、留存策略自动执行。
+
+## 小程序 API 层（/api/v1）
+
+- 能力：登录（邮箱密码 / 微信 code）、`/me`、纪念馆列表与详情（summary / profile / life / articles / media）、文章、祭奠、留言、申领、我的纪念馆与建馆。权限沿用 `Policy`，私密/暂停/未核验馆对外统一 404。
+- 统一响应：成功 `{data: ...}`，失败 `{error: {code, message}}`；登录后带 `Authorization: Bearer <token>`。错误码与端点明细见 [docs/api.md](docs/api.md)。
+- demo 账号换 token：
+
+  ```bash
+  curl -s -X POST http://127.0.0.1:8099/api/v1/auth/token \
+    -H 'Content-Type: application/json' \
+    -d '{"email":"demo@example.com","password":"Demo@123456"}'
+  ```
+
+- 微信登录需在 `.env` 配置 `WX_APPID` / `WX_SECRET` 后重启；未配置时 `/api/v1/auth/wechat` 返回 `503 wechat_not_configured`。`code2session` 只在服务端完成，客户端仅传 `wx.login` 的 code。
+- 客户端骨架：[miniprogram/](miniprogram/)（请求/鉴权封装 + 登录示例页）；接口文档：[docs/api.md](docs/api.md)。
 
 ## 文档
 
