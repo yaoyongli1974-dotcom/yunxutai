@@ -16,6 +16,7 @@ use App\Core\Kv\MysqlCounter;
 use App\Core\Kv\RedisCounter;
 use App\Core\Kv\RedisSessionHandler;
 use App\Core\Kv\RespClient;
+use App\Core\Notify;
 use App\Core\Policy;
 use App\Core\RateLimiter;
 use App\Core\Storage;
@@ -1584,6 +1585,165 @@ test('无 REDIS_URL 时驱动回退 MySQL', function (): void {
     } finally {
         $GLOBALS['config']['kv']['redis_url'] = $saved;
         Kv::reset();
+    }
+});
+
+echo "\n[邮件通知]\n";
+
+test('Notify log 驱动生成可解析邮件', function (): void {
+    $path = sys_get_temp_dir() . '/jingsi-notify-test-' . getmypid() . '.log';
+    @unlink($path);
+    Notify::configure(['driver' => 'log', 'log_path' => $path]);
+
+    try {
+        $body = "第一行正文\n第二行：静思园";
+        check(Notify::send('notify@example.com', '静思园·邀请测试', $body), '合法邮箱应发送成功');
+
+        clearstatcache();
+        check(is_file($path), '应写入日志文件');
+        $raw = (string) file_get_contents($path);
+        check_contains($raw, 'To: notify@example.com', '缺少 To 头');
+        check_contains($raw, 'Message-ID: <', '缺少 Message-ID');
+        check_contains($raw, 'MIME-Version: 1.0', '缺少 MIME-Version');
+        check_contains($raw, 'Content-Type: text/plain; charset=utf-8', '缺少 Content-Type');
+        check_contains($raw, 'Content-Transfer-Encoding: base64', '缺少传输编码');
+
+        check(preg_match('/^Subject: (.+)$/m', $raw, $matches) === 1, '缺少 Subject 头');
+        check(mb_decode_mimeheader(trim($matches[1])) === '静思园·邀请测试', 'Subject 应可按 RFC2047 解码');
+
+        $parts = preg_split('/\r?\n\r?\n/', trim($raw), 2);
+        check(count($parts) === 2, '缺少头部与正文分隔');
+        foreach (preg_split('/\r?\n/', trim($parts[1])) ?: [] as $line) {
+            check(strlen(trim($line)) <= 76, 'base64 正文单行不应超过 76 字符');
+        }
+        $decoded = base64_decode((string) preg_replace('/\s+/', '', $parts[1]), true);
+        check($decoded === $body, '正文 base64 解码后应与原文一致');
+    } finally {
+        Notify::reset();
+        @unlink($path);
+    }
+});
+
+test('Notify 非法目标与 none 驱动不写邮件', function (): void {
+    $path = sys_get_temp_dir() . '/jingsi-notify-invalid-' . getmypid() . '.log';
+    @unlink($path);
+    Notify::configure(['driver' => 'log', 'log_path' => $path]);
+
+    try {
+        check(Notify::send(null, '主题', '正文') === false, 'NULL 目标应返回 false');
+        check(Notify::send('', '主题', '正文') === false, '空目标应返回 false');
+        check(Notify::send('not-an-email', '主题', '正文') === false, '非法邮箱应返回 false');
+        clearstatcache();
+        check(!is_file($path), '非法目标不应创建日志文件');
+
+        Notify::configure(['driver' => 'none', 'log_path' => $path]);
+        check(Notify::send('notify@example.com', '主题', '正文') === false, 'none 驱动应恒为 false');
+        clearstatcache();
+        check(!is_file($path), 'none 驱动不应写日志');
+    } finally {
+        Notify::reset();
+        @unlink($path);
+    }
+});
+
+test('Notify 日志目录不存在时安全失败', function (): void {
+    $dir = sys_get_temp_dir() . '/jingsi-notify-missing-' . getmypid();
+    $path = $dir . '/mail.log';
+    Notify::configure(['driver' => 'log', 'log_path' => $path]);
+
+    try {
+        check(Notify::send('notify@example.com', '主题', '正文') === false, '目录不存在应返回 false');
+        check(!is_file($path), '目录不存在时不应写文件');
+    } finally {
+        Notify::reset();
+        @unlink($path);
+        @rmdir($dir);
+    }
+});
+
+test('API 邀请写入邮件日志，重复邀请不新增', function (): void {
+    $memorialId = (int) Db::value('SELECT id FROM memorials WHERE slug = ?', ['zhang-mingyuan']);
+    check($memorialId > 0, '前置：演示纪念馆应存在');
+
+    $token = api_token_of(api('POST', '/api/v1/auth/token', ['email' => 'demo@example.com', 'password' => 'Demo@123456']));
+    check($token !== '', '前置：馆主应可登录');
+
+    $email = 'api-member-' . getmypid() . '@example.com';
+    $logPath = (string) config('mail.log_path');
+    $before = is_file($logPath) ? (string) file_get_contents($logPath) : null;
+    $decodeMails = static function (string $raw): array {
+        $mails = [];
+        foreach (preg_split('/(?=^Date: )/m', trim($raw)) ?: [] as $chunk) {
+            $parts = preg_split('/\r?\n\r?\n/', $chunk, 2);
+            if (count($parts) !== 2) {
+                continue;
+            }
+            $decoded = base64_decode((string) preg_replace('/\s+/', '', $parts[1]), true);
+            $mails[] = ['headers' => $parts[0], 'body' => $decoded === false ? '' : $decoded];
+        }
+        return $mails;
+    };
+
+    try {
+        $invite = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/invite', [
+            'email' => $email,
+            'role' => 'editor',
+        ], $token);
+        check($invite['status'] === 201, '邀请应 201，实际 ' . $invite['status']);
+        $inviteUrl = (string) ($invite['data']['data']['invite_url'] ?? '');
+        check(str_contains($inviteUrl, '/invitations/'), '响应应含邀请链接');
+
+        clearstatcache();
+        $after = is_file($logPath) ? (string) file_get_contents($logPath) : '';
+        $mailsAfter = $decodeMails($after);
+        $mailsBefore = $decodeMails((string) $before);
+        check(count($mailsAfter) === count($mailsBefore) + 1, '邀请成功应新增一封邮件');
+        $mail = $mailsAfter[count($mailsAfter) - 1];
+        check_contains($mail['headers'], 'To: ' . $email, '邮件应投递给受邀邮箱');
+        check_contains($mail['headers'], 'Subject:', '邮件应含主题');
+        check_contains($mail['body'], $inviteUrl, '邮件正文应含邀请链接');
+        check_contains($mail['body'], '7 天', '邮件正文应说明有效期');
+
+        $dup = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/invite', [
+            'email' => $email,
+            'role' => 'editor',
+        ], $token);
+        check($dup['status'] === 422, '重复邀请应 422');
+        clearstatcache();
+        $afterDup = is_file($logPath) ? (string) file_get_contents($logPath) : '';
+        check(count($decodeMails($afterDup)) === count($mailsAfter), '重复邀请不应新增邮件');
+    } finally {
+        if ($before === null) {
+            @unlink($logPath);
+        } else {
+            @file_put_contents($logPath, $before);
+        }
+        Db::query('DELETE FROM invitations WHERE memorial_id = ? AND email = ?', [$memorialId, $email]);
+        Db::query('DELETE FROM api_tokens WHERE token_hash = ?', [hash('sha256', $token)]);
+        Notify::reset();
+    }
+});
+
+test('SMTP 不可达时 Notify 返回 false 且不抛错', function (): void {
+    Notify::configure([
+        'driver' => 'smtp',
+        'smtp_host' => '127.0.0.1',
+        'smtp_port' => 1,
+        'smtp_timeout' => 1,
+        'smtp_encryption' => 'none',
+        'smtp_username' => '',
+        'smtp_password' => '',
+    ]);
+
+    try {
+        $start = microtime(true);
+        $result = Notify::send('notify@example.com', 'SMTP 失败测试', '正文不应阻断请求');
+        $elapsed = microtime(true) - $start;
+
+        check($result === false, 'SMTP 失败应返回 false');
+        check($elapsed < 5.0, '应在超时预算内快速失败，实际 ' . round($elapsed, 2) . ' 秒');
+    } finally {
+        Notify::reset();
     }
 });
 

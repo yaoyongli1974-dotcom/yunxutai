@@ -9,6 +9,7 @@ use App\Core\Csrf;
 use App\Core\Db;
 use App\Core\Flash;
 use App\Core\HttpException;
+use App\Core\Notify;
 use App\Core\Paginator;
 use App\Core\Request;
 use App\Core\Response;
@@ -68,6 +69,34 @@ final class DataRequestController
             'user_id' => (int) $dataRequest['user_id'],
             'resolution' => $resolution,
         ]);
+
+        // 状态变更必发回执；邮箱来自 data_requests JOIN users，取不到或非法时 Notify 静默跳过。
+        $requester = Db::fetch(
+            'SELECT u.email FROM data_requests dr JOIN users u ON u.id = dr.user_id WHERE dr.id = ? LIMIT 1',
+            [(int) $dataRequest['id']]
+        );
+        $statusLabel = match ($status) {
+            'processing' => '处理中',
+            'done' => '已完成',
+            'rejected' => '已驳回',
+            default => $status,
+        };
+        $summary = $resolution !== '' ? mb_substr($resolution, 0, 200) : '（无补充说明）';
+        if (mb_strlen($resolution) > 200) {
+            $summary .= '…';
+        }
+
+        Notify::send(
+            $requester['email'] ?? null,
+            '静思园·数据权利请求处理进展',
+            "您好：\n\n"
+            . '您提交的数据权利请求（编号 #' . (int) $dataRequest['id'] . "）处理进展如下：\n\n"
+            . '处理状态：' . $statusLabel . "\n"
+            . '处理说明：' . $summary . "\n\n"
+            . '如需进一步核验身份或补充材料，请联系 '
+            . (string) config('app.support_email', 'support@example.com') . "。\n"
+            . '——静思园'
+        );
 
         Flash::info('处理状态已登记。数据导出、删除或撤回授权需核验身份与授权后离线执行；本次操作不会删除任何数据。');
         return Response::redirect('/admin/data-requests');

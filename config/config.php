@@ -18,6 +18,19 @@ return [
         'admin_email' => getenv('ADMIN_EMAIL') ?: 'admin@example.com',
         'support_email' => getenv('SUPPORT_EMAIL') ?: 'support@example.com',
     ],
+    'mail' => [
+        // log=追加邮件文本到日志（默认，开发/兜底）；smtp=真实发信；none=停用。
+        'driver'          => getenv('MAIL_DRIVER') ?: 'log',
+        'log_path'        => getenv('MAIL_LOG_PATH') ?: BASE_PATH . '/storage/logs/mail.log',
+        'from_name'       => getenv('MAIL_FROM_NAME') ?: '静思园',
+        'from_address'    => getenv('MAIL_FROM_ADDRESS') ?: 'no-reply@example.com',
+        'smtp_host'       => getenv('MAIL_SMTP_HOST') ?: '',
+        'smtp_port'       => (int) (getenv('MAIL_SMTP_PORT') ?: 587),
+        'smtp_username'   => getenv('MAIL_SMTP_USERNAME') ?: '',
+        'smtp_password'   => getenv('MAIL_SMTP_PASSWORD') ?: '',
+        'smtp_encryption' => getenv('MAIL_SMTP_ENCRYPTION') ?: 'starttls',
+        'smtp_timeout'    => (int) (getenv('MAIL_SMTP_TIMEOUT') ?: 10),
+    ],
     'db' => [
         'host'     => getenv('DB_HOST') ?: '127.0.0.1',
         'port'     => (int) (getenv('DB_PORT') ?: 3306),

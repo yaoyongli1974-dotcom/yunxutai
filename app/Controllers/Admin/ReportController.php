@@ -9,6 +9,7 @@ use App\Core\Csrf;
 use App\Core\Db;
 use App\Core\Flash;
 use App\Core\HttpException;
+use App\Core\Notify;
 use App\Core\Paginator;
 use App\Core\Request;
 use App\Core\Response;
@@ -161,6 +162,37 @@ final class ReportController
                 'resolution' => $resolution,
             ]);
         });
+
+        // 仅向留下合法邮箱的举报人回执处理结果；正文只含编号、受理类型与结论，
+        // 不复制被举报内容摘要，避免把敏感目标正文带出后台。
+        $contact = trim((string) ($report['contact'] ?? ''));
+        if (in_array($status, ['resolved', 'dismissed'], true)
+            && $contact !== ''
+            && filter_var($contact, FILTER_VALIDATE_EMAIL) !== false
+        ) {
+            $targetTypeLabel = match ((string) $report['target_type']) {
+                'memorial' => '纪念馆',
+                'message' => '留言',
+                'tribute' => '祭奠记录',
+                'media' => '影像资料',
+                'article' => '纪念文章',
+                default => '其他内容',
+            };
+            $statusLabel = $status === 'resolved' ? '已处理' : '已驳回';
+
+            Notify::send(
+                $contact,
+                '静思园·举报处理结果',
+                "您好：\n\n"
+                . '您提交的举报（编号 #' . (int) $report['id'] . "）已处理完毕。\n\n"
+                . '受理类型：' . $targetTypeLabel . '（' . report_reason_label((string) $report['reason']) . "）\n"
+                . '处理状态：' . $statusLabel . "\n"
+                . '处理结论：' . $resolution . "\n\n"
+                . "本邮件仅告知处理结果，不包含被举报内容详情。如有疑问，请联系 "
+                . (string) config('app.support_email', 'support@example.com') . "。\n"
+                . '——静思园'
+            );
+        }
 
         Flash::success('举报处理结果已保存，相关处置已写入操作日志。');
         return Response::redirect('/admin/reports/' . (int) $report['id']);

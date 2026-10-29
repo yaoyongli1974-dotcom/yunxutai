@@ -97,6 +97,35 @@ php bin/ai-worker.php --limit=3
 - AI 输出默认仅成员可见；文章为草稿。运营需在 `/admin/ai-services` 确认占位价与说明后再对外报价。
 - 成本控制：`AI_DAILY_LIMIT` 限制每人每馆每日任务数；生产应增加预算告警、按服务限额与供应商用量对账。
 
+## 4.2 邮件通知
+
+通知统一走 `App\Core\Notify`，由 `MAIL_DRIVER` 选择驱动；任何投递失败都会被吞掉并写入 PHP error_log，不影响邀请、举报处理或数据请求本身成功。
+
+| 驱动 | 行为 | 适用场景 |
+| --- | --- | --- |
+| `log` | 追加 RFC5322 样式纯文本到 `MAIL_LOG_PATH`（默认 `storage/logs/mail.log`），正文 base64 | 开发默认；生产兜底/排障 |
+| `smtp` | 纯 PHP `fsockopen` 发信，支持 `ssl` 直连、`starttls`、AUTH LOGIN | 生产真实发信 |
+| `none` | 停用，恒返回 false | 明确不发送 |
+
+```dotenv
+MAIL_DRIVER=smtp
+MAIL_LOG_PATH=/srv/jidian/storage/logs/mail.log
+MAIL_FROM_NAME="静思园"
+MAIL_FROM_ADDRESS=no-reply@memorial.example.com
+
+MAIL_SMTP_HOST=smtp.example.com
+MAIL_SMTP_PORT=587
+MAIL_SMTP_USERNAME=
+MAIL_SMTP_PASSWORD=
+MAIL_SMTP_ENCRYPTION=starttls   # ssl | starttls | none
+MAIL_SMTP_TIMEOUT=10
+```
+
+- SMTP 密码只放环境变量（或密钥管理服务），不要写进仓库常量或镜像层；`STARTTLS` 优先，465 端口使用 `ssl`。
+- 生产建议：`MAIL_DRIVER=smtp` 且 `php bin/doctor.php` 无「只写日志/停用」警告；先用测试邮箱验证 SPF/DKIM/DMARC、退信与速率限制。
+- 邮件正文边界：仅发送必要事务信息（邀请链接、处理编号/状态/结论摘要）。核验材料、死亡证明、身份证号、被举报内容正文等敏感信息**绝不进入邮件正文**；举报回执只报编号、受理类型与结论。
+- 设计取舍：通知不落库，失败仅由 `log`/`smtp` 层自证（日志或 error_log）；`audit_logs` 已保留业务操作轨迹。需要可靠重试时应在后续接入队列，而不是阻塞用户请求。
+
 ## 5. 数据库
 
 - 独立账号，仅授予目标库 `SELECT, INSERT, UPDATE, DELETE`；安装时临时需要 `CREATE`。

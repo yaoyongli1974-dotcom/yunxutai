@@ -83,6 +83,23 @@ if ($appUrl === '') {
     ok('APP_URL：' . $appUrl);
 }
 
+$mailDriver = strtolower(trim((string) config('mail.driver', 'log')));
+if ($mailDriver === 'smtp') {
+    if (trim((string) config('mail.smtp_host', '')) === '') {
+        warn('MAIL_DRIVER=smtp 但 MAIL_SMTP_HOST 为空；邮件通知会静默失败');
+    } else {
+        ok('邮件通知驱动：smtp（' . config('mail.smtp_host') . ':' . config('mail.smtp_port') . '）');
+    }
+} elseif ($mailDriver === 'log' || $mailDriver === 'none') {
+    if (config('app.env') === 'production') {
+        warn('邮件通知只写日志/停用（MAIL_DRIVER=' . $mailDriver . '），生产环境将不会真正发信');
+    } else {
+        ok('邮件通知驱动：' . $mailDriver . '（非生产环境不实际发信）');
+    }
+} else {
+    warn('未知邮件驱动 MAIL_DRIVER=' . $mailDriver . '；邮件通知会静默失败');
+}
+
 foreach (['storage', 'storage/uploads', 'storage/logs', 'storage/cache', 'storage/backups', 'storage/verifications'] as $dir) {
     $path = BASE_PATH . '/' . $dir;
     if (!is_dir($path)) {
