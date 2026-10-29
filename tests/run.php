@@ -925,6 +925,23 @@ test('API 登录与 401 错误包络', function (): void {
     check(($roles['zhang-mingyuan'] ?? '') === 'owner', '应含馆主角色成员身份');
 });
 
+test('API 微信登录链路与未配置回退', function (): void {
+    // 已配置凭据 + 假 code：应进入真实交换层并以交换错误（而非“未配置”）拒绝。
+    $fake = api('POST', '/api/v1/auth/wechat', ['code' => 'FAKE_CODE_TESTSUITE']);
+    check($fake['status'] !== 503 || ($fake['data']['error']['code'] ?? '') !== 'wechat_not_configured', '凭据已配置时不应报 wechat_not_configured');
+    $code = $fake['data']['error']['code'] ?? '';
+    $offline = $code === 'service_unavailable'; // 环境断网：stub 允许，但不得声称“未配置”
+    check(
+        $offline || $code === 'wechat_exchange_failed' || $code === 'rate_limited' || $fake['status'] === 501 || $fake['status'] === 429,
+        '假 code 应被微信交换层拒绝（wechat_exchange_failed/429，断网环境允许 service_unavailable），而非未配置'
+    );
+
+    // 缺 code：参数校验 422。
+    $empty = api('POST', '/api/v1/auth/wechat', []);
+    check($empty['status'] === 422, '缺少 code 应 422');
+    check(($empty['data']['error']['code'] ?? '') === 'validation_failed', '缺少 code 错误码应为 validation_failed');
+});
+
 test('API 列表与公开详情', function (): void {
     $list = api('GET', '/api/v1/memorials');
     check($list['status'] === 200, '公开列表应 200');
