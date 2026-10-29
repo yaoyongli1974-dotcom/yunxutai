@@ -1061,6 +1061,120 @@ test('manage 创建一律私密草稿', function (): void {
     check(db_count('memorials') === $before, '测试馆应清理干净');
 });
 
+test('成员管理：越权 403、馆不存在 404、未登录 401', function (): void {
+    $memorialId = (int) Db::value('SELECT id FROM memorials WHERE slug = ?', ['zhang-mingyuan']);
+    check($memorialId > 0, '前置：演示纪念馆应存在');
+
+    $familyToken = api_token_of(api('POST', '/api/v1/auth/token', ['email' => 'family@example.com', 'password' => 'Demo@123456']));
+    check($familyToken !== '', '前置：editor 应可登录');
+    $ownerMemberId = (int) Db::value(
+        'SELECT mm.id FROM memorial_members mm JOIN users u ON u.id = mm.user_id WHERE mm.memorial_id = ? AND u.email = ? LIMIT 1',
+        [$memorialId, 'demo@example.com']
+    );
+    check($ownerMemberId > 0, '前置：馆主成员记录应存在');
+
+    $list = api('GET', '/api/v1/manage/memorials/' . $memorialId . '/members', null, $familyToken);
+    check($list['status'] === 403, 'editor 查看成员列表应 403');
+    check(($list['data']['error']['code'] ?? '') === 'forbidden', '越权错误码应为 forbidden');
+
+    $invite = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/invite', ['role' => 'viewer'], $familyToken);
+    check($invite['status'] === 403, 'editor 邀请应 403');
+
+    $role = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/' . $ownerMemberId . '/role', ['role' => 'viewer'], $familyToken);
+    check($role['status'] === 403, 'editor 改角色应 403');
+
+    $remove = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/' . $ownerMemberId . '/remove', [], $familyToken);
+    check($remove['status'] === 403, 'editor 移除成员应 403');
+
+    $revoke = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/invitations/999999/revoke', [], $familyToken);
+    check($revoke['status'] === 403, 'editor 作废邀请应 403');
+
+    $ownerToken = api_token_of(api('POST', '/api/v1/auth/token', ['email' => 'demo@example.com', 'password' => 'Demo@123456']));
+    $missing = api('GET', '/api/v1/manage/memorials/99999/members', null, $ownerToken);
+    check($missing['status'] === 404, '不存在的馆应 404');
+    check(($missing['data']['error']['code'] ?? '') === 'not_found', '不存在馆错误码应为 not_found');
+
+    $guest = api('GET', '/api/v1/manage/memorials/' . $memorialId . '/members');
+    check($guest['status'] === 401, '未携带 token 应 401');
+    check(($guest['data']['error']['code'] ?? '') === 'unauthorized', '未登录错误码应为 unauthorized');
+});
+
+test('成员管理：馆主查看/邀请/角色/移除/作废', function (): void {
+    $memorialId = (int) Db::value('SELECT id FROM memorials WHERE slug = ?', ['zhang-mingyuan']);
+    check($memorialId > 0, '前置：演示纪念馆应存在');
+    $ownerToken = api_token_of(api('POST', '/api/v1/auth/token', ['email' => 'demo@example.com', 'password' => 'Demo@123456']));
+    check($ownerToken !== '', '前置：馆主应可登录');
+
+    $ownerMemberId = (int) Db::value(
+        'SELECT mm.id FROM memorial_members mm JOIN users u ON u.id = mm.user_id WHERE mm.memorial_id = ? AND u.email = ? LIMIT 1',
+        [$memorialId, 'demo@example.com']
+    );
+    $familyMemberId = (int) Db::value(
+        'SELECT mm.id FROM memorial_members mm JOIN users u ON u.id = mm.user_id WHERE mm.memorial_id = ? AND u.email = ? LIMIT 1',
+        [$memorialId, 'family@example.com']
+    );
+    check($ownerMemberId > 0 && $familyMemberId > 0, '前置：成员记录应存在');
+
+    $email = 'api-member-' . getmypid() . '@example.com';
+    try {
+        $list = api('GET', '/api/v1/manage/memorials/' . $memorialId . '/members', null, $ownerToken);
+        check($list['status'] === 200, '馆主查看成员列表应 200');
+        $roles = array_column($list['data']['data']['items'] ?? [], 'role');
+        check(in_array('owner', $roles, true), '成员列表应含 owner 角色');
+        check(is_array($list['data']['data']['pending'] ?? null), '应返回 pending 数组');
+        $ownerRow = null;
+        foreach ($list['data']['data']['items'] ?? [] as $item) {
+            if ((int) $item['member_id'] === $ownerMemberId) {
+                $ownerRow = $item;
+                break;
+            }
+        }
+        check($ownerRow !== null, '成员列表应含馆主记录');
+        check(($ownerRow['joined_at'] ?? '') !== '', '成员应含 joined_at');
+        check(str_contains((string) $ownerRow['email'], '***@'), '成员邮箱应打码');
+
+        $invite = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/invite', ['email' => $email, 'role' => 'viewer'], $ownerToken);
+        check($invite['status'] === 201, '邀请应 201');
+        $invitationId = (int) ($invite['data']['data']['invitation_id'] ?? 0);
+        check($invitationId > 0, '应返回 invitation_id');
+        check(str_contains((string) ($invite['data']['data']['invite_url'] ?? ''), '/invitations/'), 'invite_url 应含 /invitations/');
+        check(($invite['data']['data']['expires_at'] ?? '') !== '', '应返回 expires_at');
+
+        $dup = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/invite', ['email' => $email, 'role' => 'viewer'], $ownerToken);
+        check($dup['status'] === 422, '重复邀请同一邮箱应 422');
+        check(($dup['data']['error']['code'] ?? '') === 'validation_failed', '重复邀请错误码应为 validation_failed');
+
+        $withPending = api('GET', '/api/v1/manage/memorials/' . $memorialId . '/members', null, $ownerToken);
+        $pendingIds = array_column($withPending['data']['data']['pending'] ?? [], 'invitation_id');
+        check(in_array($invitationId, array_map('intval', $pendingIds), true), 'pending 应含新建邀请');
+
+        $revoke = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/invitations/' . $invitationId . '/revoke', [], $ownerToken);
+        check($revoke['status'] === 200 && ($revoke['data']['data']['revoked'] ?? false) === true, '作废邀请应 200 revoked=true');
+        $revokeAgain = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/invitations/' . $invitationId . '/revoke', [], $ownerToken);
+        check($revokeAgain['status'] === 404, '重复作废应 404');
+
+        $toViewer = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/' . $familyMemberId . '/role', ['role' => 'viewer'], $ownerToken);
+        check($toViewer['status'] === 200 && ($toViewer['data']['data']['role'] ?? '') === 'viewer', '改角色 viewer 应 200');
+        $toEditor = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/' . $familyMemberId . '/role', ['role' => 'editor'], $ownerToken);
+        check($toEditor['status'] === 200 && ($toEditor['data']['data']['role'] ?? '') === 'editor', '改回 editor 应 200');
+
+        $selfRemove = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/' . $ownerMemberId . '/remove', [], $ownerToken);
+        check($selfRemove['status'] === 422, '馆主对自己移除应 422');
+
+        $ownerRole = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/' . $ownerMemberId . '/role', ['role' => 'editor'], $ownerToken);
+        check($ownerRole['status'] === 404, '修改 owner 角色应 404');
+
+        $ownerRemove = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/' . $ownerMemberId . '/remove', [], $ownerToken);
+        check($ownerRemove['status'] === 422, '移除 owner 成员应 422');
+    } finally {
+        // 清理邀请并恢复 editor 角色，保证用例可重复执行且不破坏后续依赖。
+        Db::query('DELETE FROM invitations WHERE memorial_id = ? AND email = ?', [$memorialId, $email]);
+        if ($familyMemberId > 0) {
+            Db::query("UPDATE memorial_members SET status = 'active', role = 'editor' WHERE id = ?", [$familyMemberId]);
+        }
+    }
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

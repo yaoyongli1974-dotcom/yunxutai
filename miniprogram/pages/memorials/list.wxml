@@ -1,0 +1,76 @@
+<view class="page">
+  <view class="head">
+    <view class="head-main">
+      <text class="head-title">纪念馆</text>
+      <text class="head-sub">记取来时路，安放未尽言</text>
+    </view>
+    <view class="head-action" wx:if="{{!loggedIn}}" bindtap="onLoginTap">登录</view>
+    <view class="head-action" wx:else bindtap="onAccountTap">{{nickname}}</view>
+  </view>
+
+  <view class="section" wx:if="{{loggedIn && managed.length}}">
+    <view class="section-head">
+      <text class="section-title">我管理的</text>
+      <text class="section-count">{{managed.length}}</text>
+    </view>
+
+    <view
+      class="manage-row"
+      wx:for="{{managed}}"
+      wx:key="id"
+      data-index="{{index}}"
+      bindtap="onManagedTap"
+    >
+      <view class="manage-main">
+        <text class="manage-name">{{item.displayName}}</text>
+        <text class="manage-meta" wx:if="{{item.memorialTitle}}">{{item.memorialTitle}}</text>
+      </view>
+      <text class="role-badge {{item.role}}">{{item.roleLabel}}</text>
+      <text class="chevron">›</text>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <text class="section-title">公开纪念馆</text>
+      <text class="section-count" wx:if="{{total}}">{{total}}</text>
+    </view>
+
+    <view
+      class="card"
+      wx:for="{{items}}"
+      wx:key="id"
+      data-index="{{index}}"
+      bindtap="onOpenDetail"
+    >
+      <view class="cover">
+        <image
+          wx:if="{{item.coverSrc && !item.coverFailed}}"
+          class="cover-img"
+          src="{{item.coverSrc}}"
+          mode="aspectFill"
+          lazy-load="{{true}}"
+          data-index="{{index}}"
+          binderror="onCoverError"
+        />
+        <view class="cover-fallback" wx:else>
+          <text class="cover-initial">{{item.initial}}</text>
+        </view>
+      </view>
+
+      <view class="card-body">
+        <text class="card-name">{{item.displayName}}</text>
+        <text class="card-title" wx:if="{{item.memorialTitle}}">{{item.memorialTitle}}</text>
+        <text class="card-title" wx:if="{{item.lifespan}}">{{item.lifespan}}</text>
+        <text class="card-excerpt" wx:if="{{item.excerpt}}">{{item.excerpt}}</text>
+        <text class="card-excerpt muted" wx:else>暂无简介</text>
+      </view>
+    </view>
+
+    <view class="state" wx:if="{{!items.length && loading}}">正在加载…</view>
+    <view class="state" wx:elif="{{!items.length && error}}">{{error}}</view>
+    <view class="state" wx:elif="{{!items.length}}">还没有公开的纪念馆</view>
+    <view class="state" wx:elif="{{loading}}">正在加载更多…</view>
+    <view class="state" wx:elif="{{!hasMore}}">已经到底了</view>
+  </view>
+</view>

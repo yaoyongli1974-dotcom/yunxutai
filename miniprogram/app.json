@@ -1,6 +1,9 @@
 {
   "pages": [
-    "pages/login/login"
+    "pages/login/login",
+    "pages/memorials/list",
+    "pages/memorial/detail",
+    "pages/manage/members"
   ],
   "window": {
     "navigationBarTitleText": "静思园",

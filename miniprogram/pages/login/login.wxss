@@ -8,3 +8,12 @@
 .btn.primary {
   margin-top: 48rpx;
 }
+
+.guest-entry {
+  margin-top: 40rpx;
+  color: #8a7f70;
+  font-size: 24rpx;
+  letter-spacing: 1rpx;
+  text-align: center;
+  text-decoration: underline;
+}

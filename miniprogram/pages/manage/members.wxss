@@ -1,0 +1,272 @@
+.members-page {
+  padding: 40rpx 32rpx 80rpx;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  padding: 8rpx 8rpx 32rpx;
+}
+
+.head-title {
+  color: #2f2a24;
+  font-size: 44rpx;
+  letter-spacing: 6rpx;
+}
+
+.head-sub {
+  margin-top: 12rpx;
+  color: #8a7f70;
+  font-size: 24rpx;
+}
+
+.panel {
+  margin-bottom: 32rpx;
+  padding: 32rpx;
+  background: #fffdf8;
+  border: 1rpx solid #e6ddcd;
+  border-radius: 20rpx;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.panel-title {
+  display: block;
+  color: #3f5a4c;
+  font-size: 28rpx;
+  letter-spacing: 4rpx;
+}
+
+.panel-note {
+  display: block;
+  margin-top: 12rpx;
+  color: #9a8f80;
+  font-size: 22rpx;
+  line-height: 1.6;
+}
+
+.panel-head .panel-note {
+  margin-top: 0;
+}
+
+.panel .field {
+  margin-top: 24rpx;
+}
+
+.invite-email {
+  width: 100%;
+  min-height: 88rpx;
+  padding: 20rpx 24rpx;
+  background: #fffdf8;
+  border: 1rpx solid #e2d9c9;
+  border-radius: 12rpx;
+  color: #2f2a24;
+  font-size: 26rpx;
+  line-height: 1.6;
+  box-sizing: border-box;
+}
+
+.role-picker {
+  display: flex;
+}
+
+.role-option {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  margin-right: 16rpx;
+  padding: 20rpx 24rpx;
+  background: #f7f3ea;
+  border: 1rpx solid #e2d9c9;
+  border-radius: 12rpx;
+}
+
+.role-option:last-child {
+  margin-right: 0;
+}
+
+.role-option.selected {
+  background: #fffdf8;
+  border-color: #3f5a4c;
+}
+
+.role-option-label {
+  color: #3f3226;
+  font-size: 26rpx;
+}
+
+.role-option.selected .role-option-label {
+  color: #3f5a4c;
+}
+
+.role-option-note {
+  margin-top: 6rpx;
+  color: #9a8f80;
+  font-size: 20rpx;
+}
+
+.form-error {
+  display: block;
+  margin-top: 16rpx;
+  color: #9c4a3c;
+  font-size: 22rpx;
+  line-height: 1.6;
+}
+
+.member {
+  display: flex;
+  align-items: center;
+  padding: 24rpx 0;
+  border-bottom: 1rpx solid #efe7da;
+}
+
+.member:last-of-type {
+  border-bottom: none;
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72rpx;
+  height: 72rpx;
+  margin-right: 20rpx;
+  background: #f1ebdf;
+  border-radius: 36rpx;
+  flex-shrink: 0;
+}
+
+.avatar-text {
+  color: #8a7f70;
+  font-size: 28rpx;
+}
+
+.member-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.member-line {
+  display: flex;
+  align-items: center;
+}
+
+.member-name {
+  color: #2f2a24;
+  font-size: 28rpx;
+}
+
+.member-meta {
+  margin-top: 8rpx;
+  color: #9a8f80;
+  font-size: 22rpx;
+}
+
+.role-badge {
+  margin-left: 12rpx;
+  padding: 2rpx 14rpx;
+  border: 1rpx solid #e2d9c9;
+  border-radius: 8rpx;
+  color: #8a7f70;
+  font-size: 20rpx;
+  flex-shrink: 0;
+}
+
+.role-badge.owner {
+  border-color: #3f5a4c;
+  color: #3f5a4c;
+}
+
+.member-action {
+  padding: 8rpx 20rpx;
+  border: 1rpx solid #e2d9c9;
+  border-radius: 8rpx;
+  color: #9c4a3c;
+  font-size: 22rpx;
+  flex-shrink: 0;
+}
+
+.member-readonly {
+  color: #b3a898;
+  font-size: 20rpx;
+  flex-shrink: 0;
+}
+
+.invite {
+  display: flex;
+  flex-direction: column;
+  padding: 24rpx 0;
+  border-bottom: 1rpx solid #efe7da;
+}
+
+.invite:last-of-type {
+  border-bottom: none;
+}
+
+.invite-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.invite-label {
+  color: #2f2a24;
+  font-size: 26rpx;
+}
+
+.invite-actions {
+  display: flex;
+  margin-top: 16rpx;
+}
+
+.link-btn {
+  margin-right: 16rpx;
+  padding: 8rpx 20rpx;
+  border: 1rpx solid #3f5a4c;
+  border-radius: 8rpx;
+  color: #3f5a4c;
+  font-size: 22rpx;
+}
+
+.link-btn.danger {
+  border-color: #e2d9c9;
+  color: #9c4a3c;
+}
+
+.state {
+  padding: 32rpx 0;
+  color: #9a8f80;
+  font-size: 22rpx;
+  text-align: center;
+}
+
+.state-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 120rpx 24rpx;
+}
+
+.state-title {
+  color: #2f2a24;
+  font-size: 32rpx;
+  letter-spacing: 2rpx;
+}
+
+.state-text {
+  margin-top: 16rpx;
+  color: #9a8f80;
+  font-size: 24rpx;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.state-block .btn {
+  margin-top: 32rpx;
+  padding: 0 64rpx;
+}

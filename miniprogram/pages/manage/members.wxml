@@ -1,0 +1,128 @@
+<view class="page members-page">
+  <view class="head">
+    <text class="head-title">成员与邀请</text>
+    <text class="head-sub" wx:if="{{title}}">{{title}}</text>
+  </view>
+
+  <view class="state" wx:if="{{loading}}">正在加载…</view>
+
+  <view class="state-block" wx:elif="{{denied}}">
+    <text class="state-title">仅馆主可用</text>
+    <text class="state-text">成员与邀请仅纪念馆馆主可以管理。</text>
+    <button class="btn ghost" bindtap="onBackTap">返回</button>
+  </view>
+
+  <view class="state-block" wx:elif="{{error}}">
+    <text class="state-title">无法打开</text>
+    <text class="state-text">{{error}}</text>
+    <button class="btn ghost" bindtap="onBackTap">返回</button>
+  </view>
+
+  <block wx:else>
+    <view class="panel">
+      <text class="panel-title">邀请成员</text>
+      <text class="panel-note">邮箱留空即生成链接邀请；邀请 7 天内有效。</text>
+
+      <view class="field">
+        <text class="label">受邀邮箱</text>
+        <textarea
+          class="invite-email"
+          value="{{inviteEmail}}"
+          maxlength="190"
+          auto-height="{{true}}"
+          placeholder="可留空，生成通用邀请链接"
+          bindinput="onInviteEmailInput"
+        />
+      </view>
+
+      <view class="field">
+        <text class="label">角色</text>
+        <view class="role-picker">
+          <view
+            class="role-option {{inviteRole === item.value ? 'selected' : ''}}"
+            wx:for="{{roleOptions}}"
+            wx:key="value"
+            data-role="{{item.value}}"
+            bindtap="onInviteRoleTap"
+          >
+            <text class="role-option-label">{{item.label}}</text>
+            <text class="role-option-note">{{item.note}}</text>
+          </view>
+        </view>
+      </view>
+
+      <text class="form-error" wx:if="{{inviteError}}">{{inviteError}}</text>
+
+      <button
+        class="btn primary"
+        loading="{{submitting}}"
+        disabled="{{submitting}}"
+        bindtap="onInviteSubmit"
+      >
+        创建邀请
+      </button>
+    </view>
+
+    <view class="panel">
+      <view class="panel-head">
+        <text class="panel-title">成员</text>
+        <text class="panel-note">{{members.length}} 人</text>
+      </view>
+
+      <view
+        class="member"
+        wx:for="{{members}}"
+        wx:key="id"
+        data-index="{{index}}"
+        bindtap="onMemberTap"
+      >
+        <view class="avatar">
+          <text class="avatar-text">{{item.initial}}</text>
+        </view>
+        <view class="member-main">
+          <view class="member-line">
+            <text class="member-name">{{item.displayName}}</text>
+            <text class="role-badge {{item.role}}">{{item.roleLabel}}</text>
+          </view>
+          <text class="member-meta" wx:if="{{item.meta}}">{{item.meta}}</text>
+        </view>
+        <view
+          class="member-action"
+          wx:if="{{!item.isOwner}}"
+          data-index="{{index}}"
+          catchtap="onRemoveTap"
+        >
+          移除
+        </view>
+        <text class="member-readonly" wx:else>只读</text>
+      </view>
+
+      <view class="state" wx:if="{{!members.length}}">还没有其他成员</view>
+    </view>
+
+    <view class="panel">
+      <view class="panel-head">
+        <text class="panel-title">待接受的邀请</text>
+        <text class="panel-note">{{invitations.length}} 条</text>
+      </view>
+
+      <view class="invite" wx:for="{{invitations}}" wx:key="id">
+        <view class="invite-main">
+          <view class="member-line">
+            <text class="invite-label">{{item.label}}</text>
+            <text class="role-badge {{item.role}}">{{item.roleLabel}}</text>
+          </view>
+          <text class="member-meta">{{item.expiresLabel}}</text>
+        </view>
+        <view class="invite-actions">
+          <view class="link-btn" data-index="{{index}}" catchtap="onCopyInvite">复制链接</view>
+          <view class="link-btn danger" data-index="{{index}}" catchtap="onRevokeInvite">撤销</view>
+        </view>
+      </view>
+
+      <view class="state" wx:if="{{!invitations.length}}">没有待接受的邀请</view>
+    </view>
+
+    <text class="hint">馆主不可被移除；角色调整与移除以服务端校验为准。</text>
+  </block>
+</view>

@@ -36,5 +36,7 @@
     </button>
 
     <text class="hint">{{wechatHint}}</text>
+
+    <view class="guest-entry" bindtap="onGuestTap">暂不登录，先浏览纪念馆</view>
   </view>
 </view>

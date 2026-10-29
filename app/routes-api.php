@@ -6,6 +6,7 @@ use App\Api\Controllers\AuthController;
 use App\Api\Controllers\ClaimController;
 use App\Api\Controllers\ManageController;
 use App\Api\Controllers\MediaController;
+use App\Api\Controllers\MemberController;
 use App\Api\Controllers\MemorialController;
 use App\Api\Controllers\TributeController;
 use App\Core\Router;
@@ -41,4 +42,11 @@ return static function (Router $router): void {
     $router->post('/api/v1/memorials/{slug}/claim', Api::route([ClaimController::class, 'store']), ['api-auth']);
     $router->get('/api/v1/manage/memorials', Api::route([ManageController::class, 'index']), ['api-auth']);
     $router->post('/api/v1/manage/memorials', Api::route([ManageController::class, 'store']), ['api-auth']);
+
+    // 馆主成员管理
+    $router->get('/api/v1/manage/memorials/{id}/members', Api::route([MemberController::class, 'index']), ['api-auth']);
+    $router->post('/api/v1/manage/memorials/{id}/members/invite', Api::route([MemberController::class, 'invite']), ['api-auth']);
+    $router->post('/api/v1/manage/memorials/{id}/members/{memberId}/role', Api::route([MemberController::class, 'updateRole']), ['api-auth']);
+    $router->post('/api/v1/manage/memorials/{id}/members/{memberId}/remove', Api::route([MemberController::class, 'remove']), ['api-auth']);
+    $router->post('/api/v1/manage/memorials/{id}/invitations/{invitationId}/revoke', Api::route([MemberController::class, 'revokeInvitation']), ['api-auth']);
 };

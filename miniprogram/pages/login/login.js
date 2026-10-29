@@ -1,17 +1,24 @@
 /**
- * 登录示例页（开发参考，不做视觉打磨）
+ * 登录页
  *
  * - 邮箱密码登录：调用 POST /api/v1/auth/token，成功后 token 与 user 写入 storage
  * - 微信登录：wx.login 取 code → POST /api/v1/auth/wechat；服务端未配置时按钮只提示「暂未配置」
  *
- * 登录成功后的跳转由业务页决定：接入纪念馆列表后把 wx.showToast 换成
- * wx.reLaunch({ url: '/pages/memorials/memorials' }) 即可。
+ * 登录成功后的跳转：进入纪念馆列表（可继续浏览公开馆）。
  */
 const config = require('../../config');
 const auth = require('../../utils/auth');
 
 function toast(title) {
   wx.showToast({ title: title, icon: 'none', duration: 2500 });
+}
+
+/** 登录成功后进入纪念馆列表。 */
+function goMemorials() {
+  wx.showToast({ title: '登录成功', icon: 'none', duration: 800 });
+  setTimeout(function () {
+    wx.reLaunch({ url: '/pages/memorials/list' });
+  }, 500);
 }
 
 Page({
@@ -53,13 +60,11 @@ Page({
         if (app) {
           app.globalData.user = payload.user || null;
         }
-        console.log('[login] 登录成功', payload.user);
-        toast('登录成功');
+        that.setData({ loading: false });
+        goMemorials();
       })
       .catch(function (err) {
         toast((err && err.message) || '登录失败');
-      })
-      .then(function () {
         that.setData({ loading: false });
       });
   },
@@ -82,7 +87,8 @@ Page({
         if (app) {
           app.globalData.user = payload.user || null;
         }
-        toast('登录成功');
+        that.setData({ loading: false });
+        goMemorials();
       })
       .catch(function (err) {
         let message = (err && err.message) || '微信登录失败';
@@ -92,9 +98,11 @@ Page({
           message = '微信登录接口不可用（404）';
         }
         toast(message);
-      })
-      .then(function () {
         that.setData({ loading: false });
       });
+  },
+
+  onGuestTap: function () {
+    wx.reLaunch({ url: '/pages/memorials/list' });
   },
 });

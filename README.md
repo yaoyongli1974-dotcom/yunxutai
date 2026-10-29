@@ -188,7 +188,7 @@ docs/              架构、部署、安全、合规
 - 对象存储：将 `Storage` 替换为 S3/OSS 适配器，媒体仍经签名 URL 或应用代理鉴权。
 - 邮件/短信：邀请、举报处理、数据请求状态通知。
 - 付费服务：订单、合同、发票与交付流程（不得售卖虚拟祭品或影响纪念公平性）。
-- 小程序：复用同一套 API/权限策略，新增 JSON 接口层。
+- 小程序：复用同一套 API/权限策略，已新增 JSON 接口层与迷你客户端（详见下文）。
 - 管理端增强：双因素认证、细粒度管理员角色、批量审核、留存策略自动执行。
 
 ## 小程序 API 层（/api/v1）
@@ -203,8 +203,8 @@ docs/              架构、部署、安全、合规
     -d '{"email":"demo@example.com","password":"Demo@123456"}'
   ```
 
-- 微信登录需在 `.env` 配置 `WX_APPID` / `WX_SECRET` 后重启；未配置时 `/api/v1/auth/wechat` 返回 `503 wechat_not_configured`。`code2session` 只在服务端完成，客户端仅传 `wx.login` 的 code。
-- 客户端骨架：[miniprogram/](miniprogram/)（请求/鉴权封装 + 登录示例页）；接口文档：[docs/api.md](docs/api.md)。
+- 微信登录需在 `.env` 配置 `WX_APPID` / `WX_SECRET` 后重启；未配置时 `/api/v1/auth/wechat` 返回 `503 wechat_not_configured`。首次微信登录会在 `wx_identities` 自动建号（合成邮箱、不可用密码），`code2session` 只在服务端完成，客户端仅传 `wx.login` 的 code。
+- 客户端：[miniprogram/](miniprogram/) 含登录（邮箱/微信）、纪念馆列表、详情（祭奠四式 + 留言簿）、馆主「成员与邀请」管理页；签名媒体 URL 为相对路径，客户端统一加 `BASE_URL` 前缀且不缓存。接口文档：[docs/api.md](docs/api.md)。
 
 ## 文档
 

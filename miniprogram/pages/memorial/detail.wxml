@@ -1,0 +1,200 @@
+<view class="page" wx:if="{{loading}}">
+  <view class="state-block">
+    <text class="state-text">正在加载纪念馆…</text>
+  </view>
+</view>
+
+<view class="page" wx:elif="{{error}}">
+  <view class="state-block">
+    <text class="state-title">无法打开纪念馆</text>
+    <text class="state-text">{{error}}</text>
+    <button class="btn ghost" bindtap="onBackList">返回纪念馆列表</button>
+  </view>
+</view>
+
+<view class="page detail-page" wx:else>
+  <view class="hero">
+    <view class="hero-portrait">
+      <image
+        wx:if="{{coverSrc && !coverFailed}}"
+        class="hero-img"
+        src="{{coverSrc}}"
+        mode="aspectFill"
+        binderror="onCoverError"
+      />
+      <view class="hero-fallback" wx:else>
+        <text class="hero-initial">{{initial}}</text>
+      </view>
+    </view>
+
+    <text class="hero-name">{{profile.full_name || summary.name || summary.title}}</text>
+    <text class="hero-title" wx:if="{{summary.title && summary.title !== profile.full_name}}">
+      {{summary.title}}
+    </text>
+    <text class="hero-life" wx:if="{{lifespan}}">{{lifespan}}</text>
+    <text class="hero-role" wx:if="{{roleLabel}}">{{roleLabel}}</text>
+    <text class="hero-quote" wx:if="{{summary.summary}}">{{summary.summary}}</text>
+  </view>
+
+  <view class="block" wx:if="{{birthLine || deathLine || profile.bio}}">
+    <text class="block-title">生平</text>
+
+    <view class="meta-row" wx:if="{{birthLine}}">
+      <text class="meta-key">出生</text>
+      <text class="meta-value">{{birthLine}}</text>
+    </view>
+    <view class="meta-row" wx:if="{{deathLine}}">
+      <text class="meta-key">辞世</text>
+      <text class="meta-value">{{deathLine}}</text>
+    </view>
+    <text class="bio" wx:if="{{profile.bio}}">{{profile.bio}}</text>
+  </view>
+
+  <view class="block tribute-block">
+    <view class="block-head">
+      <text class="block-title">祭奠</text>
+      <text class="block-note">{{!loggedIn ? '登录后可祭奠' : (canPost ? '选择一种方式寄托哀思' : '该馆暂不接受祭奠')}}</text>
+    </view>
+
+    <view class="tribute-grid">
+      <view
+        class="tribute-item {{item.pending ? 'is-pending' : ''}}"
+        wx:for="{{tributes}}"
+        wx:key="type"
+        data-type="{{item.type}}"
+        bindtap="onTributeTap"
+      >
+        <view class="tribute-mark">{{item.mark}}</view>
+        <text class="tribute-label">{{item.label}}</text>
+      </view>
+    </view>
+
+    <view class="appendix">
+      <input
+        class="appendix-input"
+        value="{{tributeAppendix}}"
+        maxlength="{{appendixMax}}"
+        placeholder="附言（选填，200 字以内）"
+        bindinput="onAppendixInput"
+      />
+      <view class="anonymous">
+        <text class="anonymous-label">匿名</text>
+        <switch
+          checked="{{tributeAnonymous}}"
+          color="#3f5a4c"
+          bindchange="onTributeAnonymousChange"
+        />
+      </view>
+    </view>
+  </view>
+
+  <view class="block" wx:if="{{life.length}}">
+    <text class="block-title">人生轨迹</text>
+    <view class="timeline">
+      <view class="tl-item" wx:for="{{life}}" wx:key="id">
+        <view class="tl-dot"></view>
+        <view class="tl-body">
+          <text class="tl-date" wx:if="{{item.dateLabel}}">{{item.dateLabel}}</text>
+          <text class="tl-title">{{item.title}}</text>
+          <text class="tl-desc" wx:if="{{item.description}}">{{item.description}}</text>
+          <text class="tl-loc" wx:if="{{item.location}}">{{item.location}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="block" wx:if="{{articles.length}}">
+    <text class="block-title">纪念文章</text>
+    <view class="article" wx:for="{{articles}}" wx:key="id">
+      <text class="article-title">{{item.title}}</text>
+      <text class="article-meta" wx:if="{{item.meta}}">{{item.meta}}</text>
+    </view>
+  </view>
+
+  <view class="block" wx:if="{{photos.length || others.length}}">
+    <view class="block-head">
+      <text class="block-title">影像留存</text>
+      <text class="block-note" wx:if="{{mediaRefreshing}}">正在刷新图片…</text>
+    </view>
+
+    <view class="photo-grid" wx:if="{{photos.length}}">
+      <view class="photo-cell" wx:for="{{photos}}" wx:key="id">
+        <image
+          wx:if="{{!item.failed}}"
+          class="photo"
+          src="{{item.src}}"
+          mode="aspectFill"
+          lazy-load="{{true}}"
+          data-index="{{index}}"
+          binderror="onPhotoError"
+        />
+        <view class="photo photo-broken" wx:else>
+          <text class="photo-broken-text">图片已失效</text>
+        </view>
+        <text class="photo-caption" wx:if="{{item.caption}}">{{item.caption}}</text>
+      </view>
+    </view>
+
+    <view class="media-other" wx:for="{{others}}" wx:key="id">
+      <text class="media-kind">{{item.kindLabel}}</text>
+      <text class="media-caption">{{item.caption || '未命名'}}</text>
+    </view>
+  </view>
+
+  <view class="block">
+    <view class="block-head">
+      <text class="block-title">留言簿</text>
+      <text class="block-note" wx:if="{{!guestbookOpen}}">暂未开放</text>
+    </view>
+
+    <view class="guest-form" wx:if="{{guestbookOpen}}">
+      <textarea
+        class="guest-input"
+        value="{{messageInput}}"
+        maxlength="{{messageMax}}"
+        placeholder="{{loggedIn ? '写下想说的话…' : '登录后即可留言'}}"
+        disabled="{{!loggedIn}}"
+        auto-height="{{true}}"
+        bindinput="onMessageInput"
+      />
+      <view class="guest-actions">
+        <view class="anonymous">
+          <text class="anonymous-label">匿名</text>
+          <switch
+            checked="{{messageAnonymous}}"
+            color="#3f5a4c"
+            bindchange="onMessageAnonymousChange"
+          />
+        </view>
+        <text class="guest-count">{{messageLength}}/{{messageMax}}</text>
+        <button
+          class="btn primary guest-submit"
+          size="mini"
+          loading="{{messageSubmitting}}"
+          disabled="{{messageSubmitting}}"
+          bindtap="onMessageSubmit"
+        >
+          留言
+        </button>
+      </view>
+    </view>
+
+    <view class="guest-list" wx:if="{{messages.length}}">
+      <view class="guest-item" wx:for="{{messages}}" wx:key="id">
+        <view class="guest-head">
+          <text class="guest-author">{{item.author_name || '访客'}}</text>
+          <text class="guest-time">{{item.created_at}}</text>
+        </view>
+        <text class="guest-content">{{item.content}}</text>
+      </view>
+    </view>
+
+    <view class="state" wx:if="{{!messages.length && messagesLoading}}">正在加载留言…</view>
+    <view class="state" wx:elif="{{!messages.length && messagesError}}">{{messagesError}}</view>
+    <view class="state" wx:elif="{{!messages.length && guestbookOpen}}">还没有留言</view>
+    <view class="state" wx:elif="{{messagesLoading}}">正在加载更多…</view>
+    <view class="state" wx:elif="{{!messagesHasMore}}">已经到底了</view>
+  </view>
+</view>
+
+<view class="fab" wx:if="{{isOwner}}" bindtap="onOwnerTap">成员管理</view>

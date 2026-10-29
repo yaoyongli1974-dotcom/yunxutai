@@ -4,7 +4,9 @@
  */
 const request = require('./request');
 
-const BASE = '/api/v1';
+// request.js 的 buildUrl 已拼接 config.API_PREFIX（/api/v1），这里只写资源路径，
+// 避免出现 /api/v1/api/v1/... 的重复前缀（既有方法同样受益，端点语义不变）。
+const BASE = '';
 
 /** 把 { page: 1, per_page: 20 } 拼成 query string，自动跳过空值。 */
 function query(params) {
@@ -21,6 +23,10 @@ function query(params) {
 
 function slugPath(slug) {
   return encodeURIComponent(String(slug || ''));
+}
+
+function idPath(id) {
+  return encodeURIComponent(String(id === undefined || id === null ? '' : id));
 }
 
 /* ------------------------------------------------------------------ */
@@ -86,6 +92,19 @@ function createMessage(slug, content) {
   return request.post(BASE + '/memorials/' + slugPath(slug) + '/message', { content: content });
 }
 
+/**
+ * POST /memorials/{slug}/message —— 发表留言（契约字段 body，可匿名）。
+ * 与 createMessage 的差异：使用 docs/api.md 的 `body` 字段并支持 anonymous；
+ * 服务端两种字段都接受，待审时仍返回 202 + status=pending。
+ */
+function sendMessage(slug, payload) {
+  const body = payload || {};
+  return request.post(BASE + '/memorials/' + slugPath(slug) + '/message', {
+    body: body.body === undefined ? '' : body.body,
+    anonymous: body.anonymous === true,
+  });
+}
+
 /** POST /memorials/{slug}/claim —— 申领纪念馆，提交关系与理由。 */
 function claimMemorial(slug, payload) {
   const body = payload || {};
@@ -113,6 +132,48 @@ function createMemorial(payload) {
   return request.post(BASE + '/manage/memorials', payload || {});
 }
 
+/* ------------------------------------------------------------------ */
+/* 成员与邀请（仅馆主）                                                  */
+/* ------------------------------------------------------------------ */
+
+/** GET /manage/memorials/{id}/members —— 成员列表 + 待接受邀请。 */
+function listMembers(memorialId) {
+  return request.get(BASE + '/manage/memorials/' + idPath(memorialId) + '/members');
+}
+
+/** POST /manage/memorials/{id}/members/invite —— 邀请成员，email 可为空（链接邀请）。 */
+function inviteMember(memorialId, payload) {
+  const body = payload || {};
+  return request.post(BASE + '/manage/memorials/' + idPath(memorialId) + '/members/invite', {
+    email: body.email === undefined || body.email === null ? '' : String(body.email),
+    role: body.role || 'viewer',
+  });
+}
+
+/** POST /manage/memorials/{id}/members/{memberId}/role —— 修改成员角色（editor/viewer）。 */
+function updateMemberRole(memorialId, memberId, role) {
+  return request.post(
+    BASE + '/manage/memorials/' + idPath(memorialId) + '/members/' + idPath(memberId) + '/role',
+    { role: role }
+  );
+}
+
+/** POST /manage/memorials/{id}/members/{memberId}/remove —— 移除成员。 */
+function removeMember(memorialId, memberId) {
+  return request.post(
+    BASE + '/manage/memorials/' + idPath(memorialId) + '/members/' + idPath(memberId) + '/remove',
+    {}
+  );
+}
+
+/** POST /manage/memorials/{id}/invitations/{invitationId}/revoke —— 作废邀请链接。 */
+function revokeInvitation(memorialId, invitationId) {
+  return request.post(
+    BASE + '/manage/memorials/' + idPath(memorialId) + '/invitations/' + idPath(invitationId) + '/revoke',
+    {}
+  );
+}
+
 module.exports = {
   // auth
   login: login,
@@ -126,8 +187,14 @@ module.exports = {
   createTribute: createTribute,
   listMessages: listMessages,
   createMessage: createMessage,
+  sendMessage: sendMessage,
   claimMemorial: claimMemorial,
   // manage
   listManagedMemorials: listManagedMemorials,
   createMemorial: createMemorial,
+  listMembers: listMembers,
+  inviteMember: inviteMember,
+  updateMemberRole: updateMemberRole,
+  removeMember: removeMember,
+  revokeInvitation: revokeInvitation,
 };

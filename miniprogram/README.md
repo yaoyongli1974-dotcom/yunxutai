@@ -1,6 +1,6 @@
 # 静思园小程序（开发参考骨架）
 
-这是 `/api/v1` 的最小客户端示例：登录页 + 请求/鉴权/接口封装。**不是成品小程序**，用于说明如何对接服务端，业务页面（纪念馆列表、详情、留言等）请在此基础上继续开发。
+这是 `/api/v1` 的最小客户端：登录、纪念馆列表、纪念馆详情（祭奠/留言）与馆主成员管理。用于说明如何对接服务端，完整接口文档见 [../docs/api.md](../docs/api.md)。
 
 完整接口文档见 [../docs/api.md](../docs/api.md)。
 
@@ -35,8 +35,23 @@ miniprogram/
   utils/request.js                 // wx.request Promise 封装：鉴权头、错误归一、401 回调、10s 超时
   utils/auth.js                    // loginDemo / loginWechat / ensureSession / logout
   utils/api.js                     // 按端点一一对应的方法
-  pages/login/                     // 可用的登录示例页（邮箱密码 + 微信登录按钮）
+  utils/media.js                   // 签名相对路径补 BASE_URL（不缓存）
+  pages/login/                     // 登录页（邮箱密码 + 微信登录）
+  pages/memorials/list             // 纪念馆列表：公开馆 + 我管理的（可未登录浏览）
+  pages/memorial/detail            // 纪念馆详情：生平/影像/祭奠/留言簿
+  pages/manage/members             // 成员与邀请管理（仅馆主）
 ```
+
+## 页面说明
+
+| 页面 | 路径 | 说明 |
+|---|---|---|
+| 登录 | `pages/login/login` | 成功后 `reLaunch` 到纪念馆列表；「暂不登录」可直接浏览 |
+| 纪念馆列表 | `pages/memorials/list` | `GET /memorials` 公开馆分页；登录后额外显示 `GET /manage/memorials`，馆主直达成员管理 |
+| 纪念馆详情 | `pages/memorial/detail` | `GET /memorials/{slug}`；祭奠 `POST …/tribute`；留言 `GET/POST …/messages`（202 视为待审）；馆主右下角「成员管理」 |
+| 成员与邀请 | `pages/manage/members` | `GET /manage/memorials/{id}/members` + invite / role / remove / revoke；403 提示仅馆主可用 |
+
+签名媒体地址只用于当次展示：列表封面与详情图片都用 `BASE_URL + media_url`，详情图片加载失败会静默重拉详情换新签名，最多 2 次，不写入 storage。
 
 ## 必须遵守的约束
 
@@ -49,6 +64,9 @@ miniprogram/
 
 ## 说明
 
-- `app.json` 目前只注册登录页；新增页面需同步加入 `pages` 数组。
-- 登录成功后骨架只弹 toast，接入业务页后替换为 `wx.reLaunch` 跳转。
+- `app.json` 的 `pages` 第一位保持登录页；新增页面需同步加入该数组。
+- 登录成功与「暂不登录」都会进入 `/pages/memorials/list`，未登录时列表只显示公开馆，右上角提供登录入口。
+- 留言接口待审时服务端返回 `202`，`request.js` 按成功处理，页面依据 `data.status === 'pending'` 提示「留言待审核，不会立即显示」。
+- 成员管理端点（`/api/v1/manage/memorials/{id}/members…`）使用 Bearer token；非馆主返回 `403`（提示「仅馆主可用」），非成员或馆不存在按契约返回 `404`。
+- `utils/api.js` 只写资源路径，`/api/v1` 前缀由 `utils/request.js` 统一拼接（旧骨架两处都带了前缀，会请求到 `/api/v1/api/v1/…`，已在此次接入时校正，端点语义未变）。
 - 小程序不需要 CORS；在浏览器里直接调 `/api/v1` 出现 CORS 报错属正常现象（服务端只对 JSON API 放开必要来源，或根本未配置 `Access-Control-Allow-Origin`）。

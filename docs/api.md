@@ -513,6 +513,18 @@ Authorization: Bearer <token>
 
 ## 8. 馆内管理
 
+本节端点均需 Bearer token，且要求调用者是该馆 `owner`，或平台 `admin`。已登录但只是该馆 `editor` / `viewer` 时返回 `403 forbidden`；馆不存在、或调用者不在该馆成员列表时统一返回 `404 not_found`（不泄露馆是否存在）。
+
+| 编号 | 端点 | 说明 |
+|---|---|---|
+| 8.1 | `GET /manage/memorials` | 我的纪念馆 |
+| 8.2 | `POST /manage/memorials` | 创建纪念馆（强制私密草稿） |
+| 8.3 | `GET /manage/memorials/{id}/members` | 成员列表与待接受邀请 |
+| 8.4 | `POST /manage/memorials/{id}/members/invite` | 邀请成员 |
+| 8.5 | `POST /manage/memorials/{id}/members/{memberId}/role` | 修改成员角色 |
+| 8.6 | `POST /manage/memorials/{id}/members/{memberId}/remove` | 移除成员 |
+| 8.7 | `POST /manage/memorials/{id}/invitations/{invitationId}/revoke` | 作废邀请 |
+
 ### 8.1 `GET /manage/memorials` — 我的纪念馆
 
 - 鉴权：需要
@@ -574,6 +586,108 @@ Authorization: Bearer <token>
 - 错误：`401`、`422 validation_failed`（字段错误，`message` 指出原因）、`429`。
 - 来源：web `GET|POST /manage/memorials/create`（`Manage\MemorialController@store`、`MemorialService::validate`）。
 
+### 8.3 `GET /manage/memorials/{id}/members` — 成员与待接受邀请
+
+- 鉴权：需要；馆主或平台管理员
+- 参数：路径 `id`（纪念馆 ID）
+- 响应 `200`：
+
+```json
+{
+  "data": {
+    "items": [
+      {
+        "member_id": 1,
+        "user_id": 2,
+        "role": "owner",
+        "status": "active",
+        "display_name": "张明远家属",
+        "email": "d***@example.com",
+        "joined_at": "2026-10-01 09:00:00"
+      }
+    ],
+    "pending": [
+      {
+        "invitation_id": 9,
+        "email": "new@example.com",
+        "role": "editor",
+        "expires_at": "2026-11-05 10:00:00",
+        "invite_url": "https://example.com/invitations/<token>"
+      }
+    ]
+  }
+}
+```
+
+- `items`：按 `owner` 优先、再按加入时间排序；`email` 已打码（`a***@domain`）。
+- `pending`：仅未接受、未作废且未过期的邀请；`email` 为邀请时填写的邮箱（可为 `null`）。
+- 错误：`401 unauthorized`、`403 forbidden`（editor/viewer）、`404 not_found`（馆不存在或非成员）。
+- 来源：web `GET /manage/memorials/{id}/members`（`Manage\MemberController@index`），复用 `Member::all` / `Invitation::pendingFor`。
+
+### 8.4 `POST /manage/memorials/{id}/members/invite` — 邀请成员
+
+- 鉴权：需要；馆主或平台管理员
+- 参数：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `email` | string | 否 | 受邀邮箱，≤190；省略或空串表示生成通用邀请链接 |
+| `role` | string | 是 | `editor` / `viewer` |
+
+- 响应 `201`：
+
+```json
+{
+  "data": {
+    "invitation_id": 9,
+    "invite_url": "https://example.com/invitations/<token>",
+    "expires_at": "2026-11-05 10:00:00"
+  }
+}
+```
+
+- `invite_url` = `APP_URL` + `/invitations/{token}`；有效期 **7 天**。
+- 同一馆内对同一 `email` 已存在待接受邀请时返回 `422 validation_failed`（`message` 说明已有待接受邀请），不会重复创建。
+- 错误：`401`、`403`、`404`、`422`（角色非法、邮箱格式错误或重复邀请）。
+- 限流：与 web 端一致，当前未单独挂限流器；如遇滥用由网关/后续版本限制。
+- 来源：web `POST /manage/memorials/{id}/members/invite`（`Manage\MemberController@invite`），复用 `Invitation::create`。
+
+### 8.5 `POST /manage/memorials/{id}/members/{memberId}/role` — 修改成员角色
+
+- 鉴权：需要；馆主或平台管理员
+- 参数：路径 `id`、`memberId`；body `{ "role": "editor" | "viewer" }`
+- 响应 `200`：
+
+```json
+{ "data": { "member_id": 5, "role": "editor" } }
+```
+
+- `owner` 成员、不存在、不属于该馆或已 `revoked` 的成员统一返回 `404 not_found`。
+- 角色非法返回 `422 validation_failed`。
+- 错误：`401`、`403`、`404`、`422`。
+- 来源：web `POST /manage/memorials/{id}/members/{memberId}/role`（`Manage\MemberController@updateRole`），复用 `Member::updateRole`。
+
+### 8.6 `POST /manage/memorials/{id}/members/{memberId}/remove` — 移除成员
+
+- 鉴权：需要；馆主或平台管理员
+- 参数：路径 `id`、`memberId`
+- 响应 `200`：`{ "data": { "removed": true } }`
+- 目标为 `owner` 成员，或移除自己时返回 `422 validation_failed`；不存在/已移除成员返回 `404 not_found`。
+- 移除只把成员状态置为 `revoked`，不会删除其历史内容。
+- 错误：`401`、`403`、`404`、`422`。
+- 来源：web `POST /manage/memorials/{id}/members/{memberId}/remove`（`Manage\MemberController@revoke`），复用 `Member::revoke`。
+
+### 8.7 `POST /manage/memorials/{id}/invitations/{invitationId}/revoke` — 作废邀请
+
+- 鉴权：需要；馆主或平台管理员
+- 参数：路径 `id`、`invitationId`
+- 响应 `200`：`{ "data": { "revoked": true } }`
+- 不存在、不属于该馆或已作废的邀请返回 `404 not_found`。
+- 错误：`401`、`403`、`404`。
+- 来源：web `POST /manage/memorials/{id}/invitations/{invitationId}/revoke`（`Manage\MemberController@revokeInvitation`），复用 `Invitation::revoke`。
+
+> 8.3–8.7 的敏感动作（邀请、改角色、移除成员、作废邀请）均写入 `audit_logs`，事件名沿用 web 端 `member.invite` / `member.update_role` / `member.revoke` / `invitation.revoke`。API token 场景没有网页 session，审计记录的 `actor_user_id` 可能为空（现有 `Audit` 实现限制）。
+
 ## 9. 频率限制
 
 同名端点的阈值与 web 端保持一致（服务端实现如调整，以实际返回的 `429` 为准）：
@@ -585,6 +699,7 @@ Authorization: Bearer <token>
 | `POST /memorials/{slug}/tribute` | 12 次 / 10 分钟 | 用户 + 纪念馆 |
 | `POST /memorials/{slug}/messages` | 6 次 / 10 分钟 | 用户 + 纪念馆 |
 | `POST /memorials/{slug}/claim` | 3 次 / 24 小时 | 用户 |
+| `POST /manage/memorials/{id}/members/*`、`POST /manage/memorials/{id}/invitations/*/revoke` | 暂未单独限流（与 web 端一致） | — |
 | `GET` 类端点 | 一般不限流 | 如遇滥用由网关限制 |
 
 被限流返回 `429 rate_limited`，客户端应提示「操作过于频繁，请稍后再试」并短暂禁用按钮，不要立即自动重试。
