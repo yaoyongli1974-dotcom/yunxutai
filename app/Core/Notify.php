@@ -134,7 +134,7 @@ final class Notify
             throw new NotifyException('不支持的 SMTP 加密方式：' . $encryption);
         }
 
-        $remote = ($encryption === 'ssl' ? 'ssl://' : 'tcp://') . $host . ':' . $port;
+        $remote = ($encryption === 'ssl' ? 'ssl://' : 'tcp://') . $host;
         $stream = @fsockopen($remote, $port, $errno, $errstr, $timeout);
         if (!is_resource($stream)) {
             throw new NotifyException('SMTP 连接失败：' . ($errstr !== '' ? $errstr : 'unknown error') . ' (' . $errno . ')');
