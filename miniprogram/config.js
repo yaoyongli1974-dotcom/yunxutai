@@ -8,7 +8,7 @@
  * 微信开发者工具需勾选「详情 → 本地设置 → 不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书」。
  * 真机/上线必须改为已在微信公众平台「开发管理 → 服务器域名」备案的 HTTPS 域名。
  */
-const BASE_URL = 'http://192.168.0.199:8020';
+const BASE_URL = 'https://yunxutai.cn';
 
 /** API 版本前缀，与 app/routes.php 的 /api/v1 保持一致。 */
 const API_PREFIX = '/api/v1';
