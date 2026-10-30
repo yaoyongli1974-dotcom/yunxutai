@@ -688,6 +688,32 @@ Authorization: Bearer <token>
 
 > 8.3–8.7 的敏感动作（邀请、改角色、移除成员、作废邀请）均写入 `audit_logs`，事件名沿用 web 端 `member.invite` / `member.update_role` / `member.revoke` / `invitation.revoke`。API token 场景没有网页 session，审计记录的 `actor_user_id` 可能为空（现有 `Audit` 实现限制）。
 
+## 8A. 投诉与举报
+
+### 8A.1 `POST /reports` — 提交举报
+
+- 鉴权：需要（Bearer token）
+- 参数：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `target_type` | string | 是 | `memorial` / `message` / `tribute` / `media` / `article` |
+| `target_id` | int | 是 | 目标 ID（列表/详情的 `summary.id`，文章页的 `id`） |
+| `reason` | string | 是 | `fake_person` / `living_person` / `privacy` / `insult` / `illegal` / `copyright` / `other` |
+| `detail` | string | 是 | 具体情况，10–2000 字 |
+| `reporter_name` | string | 否 | 默认账号昵称，≤80 字 |
+| `contact` | string | 否 | 联系方式 ≤190 字；不传时用账号邮箱，微信合成邮箱（`@wx.local`）不回填 |
+
+- 响应 `201`：`{ "data": { "id": 12, "status": "open", "priority": "urgent" } }`
+- 分级：`fake_person` / `living_person` → `urgent`；`privacy` / `insult` / `illegal` → `high`；其余 `normal`。后台按优先级排序，紧急举报支持先行暂停纪念馆。
+- 错误：
+  - `401 unauthorized`：未登录；
+  - `404 not_found`：目标不存在，**或目标对当前用户不可见**（私密馆、待审留言/媒体、未发布文章一律 404，不泄露存在性）；
+  - `422 validation_failed`：`reason`/`detail`/`reporter_name` 校验失败，`fields` 给出逐字段原因；
+  - `429 rate_limited`：同一 IP 每小时最多 5 次。
+- 来源：web `POST /report`（`ReportController@store`）同语义；差异是 API 以 Bearer 身份替代算术验证码，并以 IP 限流防止滥用。
+- 审计：`report.create`，`meta.channel = "api"`。
+
 ## 9. 频率限制
 
 同名端点的阈值与 web 端保持一致（服务端实现如调整，以实际返回的 `429` 为准）：
@@ -699,6 +725,7 @@ Authorization: Bearer <token>
 | `POST /memorials/{slug}/tribute` | 12 次 / 10 分钟 | 用户 + 纪念馆 |
 | `POST /memorials/{slug}/messages` | 6 次 / 10 分钟 | 用户 + 纪念馆 |
 | `POST /memorials/{slug}/claim` | 3 次 / 24 小时 | 用户 |
+| `POST /reports` | 5 次 / 小时 | 按 IP |
 | `POST /manage/memorials/{id}/members/*`、`POST /manage/memorials/{id}/invitations/*/revoke` | 暂未单独限流（与 web 端一致） | — |
 | `GET` 类端点 | 一般不限流 | 如遇滥用由网关限制 |
 

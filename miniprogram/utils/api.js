@@ -114,6 +114,22 @@ function claimMemorial(slug, payload) {
   });
 }
 
+/**
+ * POST /reports —— 投诉与举报（活人被祭拜等紧急场景）。
+ * payload: { target_type, target_id, reason, detail, reporter_name?, contact? }
+ */
+function sendReport(payload) {
+  const body = payload || {};
+  return request.post(BASE + '/reports', {
+    target_type: body.target_type,
+    target_id: body.target_id,
+    reason: body.reason,
+    detail: body.detail,
+    reporter_name: body.reporter_name === undefined ? '' : String(body.reporter_name),
+    contact: body.contact === undefined ? '' : String(body.contact),
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* 馆内管理                                                             */
 /* ------------------------------------------------------------------ */
@@ -189,6 +205,7 @@ module.exports = {
   createMessage: createMessage,
   sendMessage: sendMessage,
   claimMemorial: claimMemorial,
+  sendReport: sendReport,
   // manage
   listManagedMemorials: listManagedMemorials,
   createMemorial: createMemorial,

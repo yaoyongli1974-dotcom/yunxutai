@@ -11,3 +11,7 @@
 !/storage/backups/.gitkeep
 /storage/verifications/*
 !/storage/verifications/.gitkeep
+
+# 小程序本地配置（本地生成，不提交）
+miniprogram/project.config.json
+miniprogram/project.private.config.json

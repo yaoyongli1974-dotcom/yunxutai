@@ -1,0 +1,113 @@
+<view class="page">
+  <view class="brand">
+    <text class="brand-title">新建纪念馆</text>
+    <text class="brand-sub">新馆默认私密，仅你可见；完成身份核验后可对外开放</text>
+  </view>
+
+  <view class="field">
+    <text class="label">逝者姓名 *</text>
+    <input
+      class="input {{errors.full_name ? 'is-error' : ''}}"
+      value="{{form.full_name}}"
+      maxlength="120"
+      placeholder="请填写姓名"
+      data-field="full_name"
+      bindinput="onInput"
+    />
+    <text class="error" wx:if="{{errors.full_name}}">{{errors.full_name}}</text>
+  </view>
+
+  <view class="field">
+    <text class="label">性别 *</text>
+    <picker mode="selector" range="{{genders}}" range-key="label" value="{{genderIndex}}" bindchange="onGenderChange">
+      <view class="input picker-value">{{genders[genderIndex].label}}</view>
+    </picker>
+  </view>
+
+  <view class="field">
+    <text class="label">纪念馆名称</text>
+    <input
+      class="input"
+      value="{{form.title}}"
+      maxlength="190"
+      placeholder="如「张明远纪念馆」，留空则用姓名"
+      data-field="title"
+      bindinput="onInput"
+    />
+  </view>
+
+  <view class="field">
+    <text class="label">纪念引言</text>
+    <input
+      class="input"
+      value="{{form.summary}}"
+      maxlength="500"
+      placeholder="纪念页上的一句话（选填）"
+      data-field="summary"
+      bindinput="onInput"
+    />
+  </view>
+
+  <view class="more-toggle" bindtap="onToggleMore">
+    <text>{{showMore ? '收起选填信息' : '展开出生/安葬与生平（选填）'}}</text>
+  </view>
+
+  <block wx:if="{{showMore}}">
+    <view class="field">
+      <text class="label">出生日期</text>
+      <picker mode="date" value="{{form.birth_date}}" end="{{birthMax}}" bindchange="onBirthChange">
+        <view class="input picker-value">{{form.birth_date || '选择日期'}}</view>
+      </picker>
+    </view>
+
+    <view class="field">
+      <text class="label">逝世日期</text>
+      <picker mode="date" value="{{form.death_date}}" end="{{birthMax}}" bindchange="onDeathChange">
+        <view class="input picker-value">{{form.death_date || '选择日期'}}</view>
+      </picker>
+      <text class="error" wx:if="{{errors.death_date}}">{{errors.death_date}}</text>
+    </view>
+
+    <view class="field">
+      <text class="label">出生地</text>
+      <input class="input" value="{{form.birth_place}}" maxlength="190" placeholder="选填" data-field="birth_place" bindinput="onInput" />
+    </view>
+
+    <view class="field">
+      <text class="label">安葬地</text>
+      <input class="input" value="{{form.death_place}}" maxlength="190" placeholder="选填" data-field="death_place" bindinput="onInput" />
+    </view>
+
+    <view class="field">
+      <text class="label">生平简介</text>
+      <textarea
+        class="input textarea"
+        value="{{form.bio}}"
+        maxlength="5000"
+        auto-height="{{true}}"
+        placeholder="他/她的一生（选填）"
+        data-field="bio"
+        bindinput="onInput"
+      />
+    </view>
+
+    <view class="field">
+      <text class="label">自定义链接</text>
+      <input class="input" value="{{form.slug}}" maxlength="60" placeholder="选填，如 zhang-mingyuan" data-field="slug" bindinput="onInput" />
+      <text class="hint">不填则由系统生成；链接一经公开不建议修改</text>
+    </view>
+  </block>
+
+  <view class="declaration">
+    <switch checked="{{declaration}}" color="#3f5a4c" bindchange="onDeclarationChange" />
+    <text class="declaration-text">
+      我确认创建内容真实、已获得家属授权，并同意《服务条款》与《隐私说明》；如涉及他人权益，平台可暂停展示并要求补充材料。
+    </text>
+  </view>
+  <text class="error" wx:if="{{errors.declaration}}">{{errors.declaration}}</text>
+
+  <button class="btn primary" loading="{{submitting}}" disabled="{{submitting}}" bindtap="onSubmit">
+    创建纪念馆
+  </button>
+  <text class="footnote">创建后可进入「馆内管理 → 身份核验」提交材料，审核通过才能公开。</text>
+</view>

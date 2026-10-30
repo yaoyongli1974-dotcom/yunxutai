@@ -1258,6 +1258,96 @@ test('成员管理：馆主查看/邀请/角色/移除/作废', function (): voi
     }
 });
 
+test('API 举报与目标可见性', function (): void {
+    $token = api_token_of(api('POST', '/api/v1/auth/token', ['email' => 'demo@example.com', 'password' => 'Demo@123456']));
+    check($token !== '', '前置：登录应成功');
+    $memorialId = (int) Db::value('SELECT id FROM memorials WHERE slug = ?', ['zhang-mingyuan']);
+    check($memorialId > 0, '前置：公开馆应存在');
+
+    $before = db_count('reports');
+    $created = api('POST', '/api/v1/reports', [
+        'target_type' => 'memorial',
+        'target_id' => $memorialId,
+        'reason' => 'living_person',
+        'detail' => 'API 举报通道自检：疑似活人被祭拜，请平台核实处理。',
+    ], $token);
+    check($created['status'] === 201, '举报应 201');
+    check(($created['data']['data']['priority'] ?? '') === 'urgent', '活人被祭拜应分级 urgent');
+    check(db_count('reports') === $before + 1, '举报应入库');
+    $reportId = (int) ($created['data']['data']['id'] ?? 0);
+    check($reportId > 0, '应返回举报编号');
+    $tempMemorialId = 0;
+
+    try {
+        $badReason = api('POST', '/api/v1/reports', [
+            'target_type' => 'memorial',
+            'target_id' => $memorialId,
+            'reason' => 'not-a-reason',
+            'detail' => str_repeat('测', 15),
+        ], $token);
+        check($badReason['status'] === 422, '非法 reason 应 422');
+        check(($badReason['data']['error']['code'] ?? '') === 'validation_failed', '错误码应为 validation_failed');
+        check(isset($badReason['data']['error']['fields']['reason']), '应返回 reason 字段错误');
+
+        $short = api('POST', '/api/v1/reports', [
+            'target_type' => 'memorial',
+            'target_id' => $memorialId,
+            'reason' => 'privacy',
+            'detail' => '太短',
+        ], $token);
+        check($short['status'] === 422, '详情过短应 422');
+
+        $privateId = (int) Db::value('SELECT id FROM memorials WHERE slug = ?', ['memory-11bbb2ba']);
+        if ($privateId <= 0) {
+            // 测试库无该私密馆时，现建一座私密草稿（馆主可先看，他人不可见）。
+            $temp = api('POST', '/api/v1/manage/memorials', [
+                'full_name' => '举报可见性自检',
+                'gender' => 'unknown',
+                'title' => '举报可见性自检',
+            ], $token);
+            check($temp['status'] === 201, '前置：临时私密馆应创建成功');
+            $privateId = (int) ($temp['data']['data']['id'] ?? 0);
+            $tempMemorialId = $privateId;
+        }
+        check($privateId > 0, '前置：私密馆应存在');
+        $familyToken = api_token_of(api('POST', '/api/v1/auth/token', ['email' => 'family@example.com', 'password' => 'Demo@123456']));
+        check($familyToken !== '', '前置：非成员账号应可登录');
+        $private = api('POST', '/api/v1/reports', [
+            'target_type' => 'memorial',
+            'target_id' => $privateId,
+            'reason' => 'privacy',
+            'detail' => str_repeat('测', 15),
+        ], $familyToken);
+        check($private['status'] === 404, '私密馆对无权者举报应 404');
+        check(($private['data']['error']['code'] ?? '') === 'not_found', '私密馆错误码应为 not_found');
+
+        $missing = api('POST', '/api/v1/reports', [
+            'target_type' => 'article',
+            'target_id' => 99999999,
+            'reason' => 'other',
+            'detail' => str_repeat('测', 15),
+        ], $token);
+        check($missing['status'] === 404, '不存在的目标应 404');
+
+        $guest = api('POST', '/api/v1/reports', [
+            'target_type' => 'memorial',
+            'target_id' => $memorialId,
+            'reason' => 'other',
+            'detail' => str_repeat('测', 15),
+        ]);
+        check($guest['status'] === 401, '未登录举报应 401');
+    } finally {
+        if ($reportId > 0) {
+            Db::query('DELETE FROM reports WHERE id = ?', [$reportId]);
+        }
+        if ($tempMemorialId > 0) {
+            Db::query('DELETE FROM memorial_members WHERE memorial_id = ?', [$tempMemorialId]);
+            Db::query('DELETE FROM memorials WHERE id = ?', [$tempMemorialId]);
+        }
+    }
+    check(db_count('reports') === $before, '测试举报应清理干净');
+});
+
 echo "\n[管理端 2FA]\n";
 
 $cleanupTotp = static function (string $email): void {

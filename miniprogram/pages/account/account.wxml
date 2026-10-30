@@ -1,0 +1,36 @@
+<view class="page" wx:if="{{loading}}">
+  <view class="state-text-block">
+    <text class="state-text">正在加载…</text>
+  </view>
+</view>
+
+<view class="page" wx:elif="{{error}}">
+  <view class="state-text-block">
+    <text class="state-title">{{error}}</text>
+    <button class="btn ghost" bindtap="onLogoutTap">重新登录</button>
+  </view>
+</view>
+
+<view class="page account-page" wx:else>
+  <view class="profile-card">
+    <view class="avatar">{{initial}}</view>
+    <view class="profile-main">
+      <text class="profile-name">{{user.display_name || user.nickname || '用户'}}</text>
+      <text class="profile-email">{{user.email}}</text>
+    </view>
+  </view>
+
+  <view class="block">
+    <text class="block-title">我参与的纪念馆</text>
+    <text class="memberships" wx:if="{{membershipText}}">{{membershipText}}</text>
+    <text class="memberships muted" wx:else>暂无参与的纪念馆</text>
+  </view>
+
+  <view class="block">
+    <text class="block-title">账号说明</text>
+    <text class="note">· 基础纪念功能永久免费；增值服务明码标价，不自动扣费。</text>
+    <text class="note">· 退出登录会使当前设备 token 失效，其他设备不受影响。</text>
+  </view>
+
+  <button class="btn logout" bindtap="onLogoutTap">退出登录</button>
+</view>

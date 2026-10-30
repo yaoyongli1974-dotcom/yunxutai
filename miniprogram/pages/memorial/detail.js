@@ -518,6 +518,36 @@ Page({
     });
   },
 
+  /* 纪念文章：进文章阅读页（404 由服务端统一判定，页面做占位）。 */
+  onArticleTap: function (e) {
+    const id = e.currentTarget.dataset.id;
+    const slug = this.data.summary && this.data.summary.slug;
+    if (!id || !slug) {
+      return;
+    }
+    wx.navigateTo({
+      url: '/pages/article/view?slug=' + encodeURIComponent(String(slug)) +
+        '&id=' + encodeURIComponent(String(id)),
+    });
+  },
+
+  /* 投诉与举报：活人被祭拜等紧急场景的移动端入口。 */
+  onReportTap: function () {
+    const summary = this.data.summary || {};
+    if (!summary.id) {
+      return;
+    }
+    if (!auth.isLoggedIn()) {
+      wx.navigateTo({ url: '/pages/login/login' });
+      return;
+    }
+    const label = summary.full_name || summary.name || summary.title || '';
+    wx.navigateTo({
+      url: '/pages/report/report?type=memorial&id=' + encodeURIComponent(String(summary.id)) +
+        '&label=' + encodeURIComponent(label),
+    });
+  },
+
   onLoginTap: function () {
     wx.navigateTo({ url: '/pages/login/login' });
   },

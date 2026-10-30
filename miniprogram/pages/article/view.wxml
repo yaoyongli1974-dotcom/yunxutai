@@ -1,0 +1,24 @@
+<view class="page" wx:if="{{loading}}">
+  <view class="state-block">
+    <text class="state-text">正在加载文章…</text>
+  </view>
+</view>
+
+<view class="page" wx:elif="{{error}}">
+  <view class="state-block">
+    <text class="state-title">无法打开文章</text>
+    <text class="state-text">{{error}}</text>
+    <button class="btn ghost" bindtap="onBack">返回</button>
+  </view>
+</view>
+
+<view class="page article-page" wx:else>
+  <text class="article-heading">{{article.title}}</text>
+  <view class="article-byline">
+    <text wx:if="{{article.author}}">{{article.author}}</text>
+    <text wx:if="{{article.publishedAt}}"> · {{article.publishedAt}}</text>
+    <text class="article-draft" wx:if="{{article.status !== 'published'}}">草稿</text>
+  </view>
+
+  <rich-text class="article-body" nodes="{{article.contentHtml}}"></rich-text>
+</view>

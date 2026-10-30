@@ -187,3 +187,23 @@
   font-size: 24rpx;
   text-align: center;
 }
+
+.create-bar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 40rpx;
+  padding: 24rpx 32rpx;
+  background: #eef0e9;
+  border: 1rpx dashed #a8b5a3;
+  border-radius: 12rpx;
+  color: #3f5a4c;
+}
+
+.create-plus {
+  margin-right: 12rpx;
+  font-size: 32rpx;
+}
+
+.create-text {
+  font-size: 26rpx;
+}

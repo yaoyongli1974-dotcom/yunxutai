@@ -1,0 +1,50 @@
+.article-page {
+  padding-bottom: 96rpx;
+}
+
+.article-heading {
+  display: block;
+  font-size: 44rpx;
+  line-height: 1.4;
+  letter-spacing: 2rpx;
+}
+
+.article-byline {
+  margin: 20rpx 0 48rpx;
+  color: #8a7f70;
+  font-size: 24rpx;
+}
+
+.article-draft {
+  margin-left: 12rpx;
+  padding: 4rpx 12rpx;
+  background: #efe6d6;
+  border-radius: 6rpx;
+  color: #8a6b2f;
+  font-size: 20rpx;
+}
+
+.article-body {
+  color: #2f2a24;
+  font-size: 30rpx;
+  line-height: 1.9;
+  word-break: break-word;
+}
+
+.state-block {
+  padding: 160rpx 0;
+  text-align: center;
+}
+
+.state-title {
+  display: block;
+  margin-bottom: 16rpx;
+  font-size: 32rpx;
+}
+
+.state-text {
+  display: block;
+  color: #8a7f70;
+  font-size: 24rpx;
+  line-height: 1.7;
+}

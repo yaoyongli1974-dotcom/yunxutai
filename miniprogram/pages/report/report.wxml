@@ -1,0 +1,49 @@
+<view class="page">
+  <view class="brand">
+    <text class="brand-title">投诉与举报</text>
+    <text class="brand-sub" wx:if="{{targetLabel}}">举报对象：{{targetLabel}}</text>
+  </view>
+
+  <view class="tip">
+    <text>活人被祭拜、虚构逝者将被优先处理；平台核验后可先行暂停纪念馆展示。恶意举报会被记录。</text>
+  </view>
+
+  <view class="field">
+    <text class="label">举报类型 *</text>
+    <picker mode="selector" range="{{reasons}}" range-key="label" value="{{reasonIndex}}" bindchange="onReasonChange">
+      <view class="input picker-value">{{reasons[reasonIndex].label}}</view>
+    </picker>
+  </view>
+
+  <view class="field">
+    <text class="label">具体情况 *（{{detailLength}}/{{detailMax}}）</text>
+    <textarea
+      class="input textarea"
+      value="{{detail}}"
+      maxlength="{{detailMax}}"
+      auto-height="{{true}}"
+      placeholder="说明你遇到的问题，例如：逝者仍在世、内容涉及隐私、含有不当言论等"
+      bindinput="onDetailInput"
+    />
+    <text class="error" wx:if="{{errors.detail}}">{{errors.detail}}</text>
+  </view>
+
+  <view class="field">
+    <text class="label">你的称呼 *</text>
+    <input class="input" value="{{reporterName}}" maxlength="80" placeholder="收联系用，80 字以内" bindinput="onNameInput" />
+    <text class="error" wx:if="{{errors.reporter_name}}">{{errors.reporter_name}}</text>
+  </view>
+
+  <view class="field">
+    <text class="label">联系方式</text>
+    <input class="input" value="{{contact}}" maxlength="190" placeholder="选填，邮箱/电话，便于反馈处理进展" bindinput="onContactInput" />
+    <text class="error" wx:if="{{errors.contact}}">{{errors.contact}}</text>
+  </view>
+
+  <text class="error" wx:if="{{errors.form}}">{{errors.form}}</text>
+
+  <button class="btn primary" loading="{{submitting}}" disabled="{{submitting}}" bindtap="onSubmit">
+    提交举报
+  </button>
+  <text class="footnote">举报内容仅平台管理员可见；核验材料、身份证号等隐私不会出现在反馈中。</text>
+</view>

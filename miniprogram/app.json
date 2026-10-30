@@ -3,7 +3,11 @@
     "pages/login/login",
     "pages/memorials/list",
     "pages/memorial/detail",
-    "pages/manage/members"
+    "pages/article/view",
+    "pages/manage/create",
+    "pages/manage/members",
+    "pages/report/report",
+    "pages/account/account"
   ],
   "window": {
     "navigationBarTitleText": "静思园",

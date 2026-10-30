@@ -105,7 +105,7 @@
 
   <view class="block" wx:if="{{articles.length}}">
     <text class="block-title">纪念文章</text>
-    <view class="article" wx:for="{{articles}}" wx:key="id">
+    <view class="article" wx:for="{{articles}}" wx:key="id" data-id="{{item.id}}" bindtap="onArticleTap">
       <text class="article-title">{{item.title}}</text>
       <text class="article-meta" wx:if="{{item.meta}}">{{item.meta}}</text>
     </view>
@@ -194,6 +194,14 @@
     <view class="state" wx:elif="{{!messages.length && guestbookOpen}}">还没有留言</view>
     <view class="state" wx:elif="{{messagesLoading}}">正在加载更多…</view>
     <view class="state" wx:elif="{{!messagesHasMore}}">已经到底了</view>
+  </view>
+
+  <view class="block report-block">
+    <view class="block-head">
+      <text class="block-title">发现问题？</text>
+    </view>
+    <text class="report-note">如发现逝者信息不实（如仍有人在世）、内容涉及隐私或不当言论，可向我们举报；平台会优先核查并处理。</text>
+    <button class="btn ghost report-btn" bindtap="onReportTap">投诉与举报</button>
   </view>
 </view>
 

@@ -37,9 +37,13 @@ miniprogram/
   utils/api.js                     // 按端点一一对应的方法
   utils/media.js                   // 签名相对路径补 BASE_URL（不缓存）
   pages/login/                     // 登录页（邮箱密码 + 微信登录）
-  pages/memorials/list             // 纪念馆列表：公开馆 + 我管理的（可未登录浏览）
-  pages/memorial/detail            // 纪念馆详情：生平/影像/祭奠/留言簿
+  pages/memorials/list             // 纪念馆列表：公开馆 + 我管理的 + 新建入口（可未登录浏览）
+  pages/memorial/detail            // 纪念馆详情：生平/影像/祭奠/留言簿/文章与举报入口
+  pages/article/view               // 纪念文章阅读（rich-text 渲染服务端 content_html）
+  pages/manage/create              // 新建纪念馆（私密草稿）
   pages/manage/members             // 成员与邀请管理（仅馆主）
+  pages/report/report              // 投诉与举报（活人被祭拜等紧急场景）
+  pages/account/account            // 个人中心：用户信息/成员馆/退出登录
 ```
 
 ## 页面说明
@@ -47,9 +51,13 @@ miniprogram/
 | 页面 | 路径 | 说明 |
 |---|---|---|
 | 登录 | `pages/login/login` | 成功后 `reLaunch` 到纪念馆列表；「暂不登录」可直接浏览 |
-| 纪念馆列表 | `pages/memorials/list` | `GET /memorials` 公开馆分页；登录后额外显示 `GET /manage/memorials`，馆主直达成员管理 |
-| 纪念馆详情 | `pages/memorial/detail` | `GET /memorials/{slug}`；祭奠 `POST …/tribute`；留言 `GET/POST …/messages`（202 视为待审）；馆主右下角「成员管理」 |
+| 纪念馆列表 | `pages/memorials/list` | `GET /memorials` 公开馆分页；登录后显示 `GET /manage/memorials`（馆主直达成员管理）与「＋新建纪念馆」；右上角进个人中心 |
+| 纪念馆详情 | `pages/memorial/detail` | `GET /memorials/{slug}`；祭奠 `POST …/tribute`；留言 `GET/POST …/messages`（202 视为待审）；文章点击进阅读页；页面底部「投诉与举报」入口；馆主右下角「成员管理」 |
+| 纪念文章 | `pages/article/view` | `GET /memorials/{slug}/articles/{id}`，rich-text 渲染 `content_html`；404 显示占位 |
+| 新建纪念馆 | `pages/manage/create` | `POST /manage/memorials`；姓名/性别/声明必填，创建后固定私密草稿，引导走身份核验后公开 |
 | 成员与邀请 | `pages/manage/members` | `GET /manage/memorials/{id}/members` + invite / role / remove / revoke；403 提示仅馆主可用 |
+| 投诉与举报 | `pages/report/report` | `POST /reports`；七类举报原因（活人被祭拜/虚构逝者自动升级 urgent），422 逐字段提示、429 提示稍后再试 |
+| 个人中心 | `pages/account/account` | `GET /me` 展示打码邮箱与成员馆；「退出登录」调 `POST /auth/logout` 并清本地 |
 
 签名媒体地址只用于当次展示：列表封面与详情图片都用 `BASE_URL + media_url`，详情图片加载失败会静默重拉详情换新签名，最多 2 次，不写入 storage。
 

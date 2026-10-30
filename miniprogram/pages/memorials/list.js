@@ -227,17 +227,10 @@ Page({
   },
 
   onAccountTap: function () {
-    const that = this;
-    wx.showActionSheet({
-      itemList: ['退出登录'],
-      success: function () {
-        auth.logout().then(function () {
-          that._loggedIn = false;
-          that.syncLoginState();
-          that.setData({ managed: [] });
-          toast('已退出登录');
-        });
-      },
-    });
+    wx.navigateTo({ url: '/pages/account/account' });
+  },
+
+  onCreateTap: function () {
+    wx.navigateTo({ url: '/pages/manage/create' });
   },
 });

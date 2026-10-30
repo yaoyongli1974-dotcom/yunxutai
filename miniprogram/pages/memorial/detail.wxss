@@ -453,3 +453,19 @@
   letter-spacing: 2rpx;
   z-index: 10;
 }
+
+.report-block {
+  margin-top: 16rpx;
+}
+
+.report-note {
+  display: block;
+  margin: 8rpx 0 20rpx;
+  color: #8a7f70;
+  font-size: 22rpx;
+  line-height: 1.7;
+}
+
+.report-btn {
+  width: 320rpx;
+}

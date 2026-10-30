@@ -8,6 +8,7 @@ use App\Api\Controllers\ManageController;
 use App\Api\Controllers\MediaController;
 use App\Api\Controllers\MemberController;
 use App\Api\Controllers\MemorialController;
+use App\Api\Controllers\ReportController;
 use App\Api\Controllers\TributeController;
 use App\Core\Router;
 
@@ -37,6 +38,9 @@ return static function (Router $router): void {
     $router->post('/api/v1/memorials/{slug}/tribute', Api::route([TributeController::class, 'tribute']), ['api-auth']);
     $router->get('/api/v1/memorials/{slug}/messages', Api::route([TributeController::class, 'messages']));
     $router->post('/api/v1/memorials/{slug}/message', Api::route([TributeController::class, 'message']), ['api-auth']);
+
+    // 投诉与举报（活人被祭拜等紧急场景；无需验证码，按 IP 限流）
+    $router->post('/api/v1/reports', Api::route([ReportController::class, 'store']), ['api-auth']);
 
     // 申领与管理
     $router->post('/api/v1/memorials/{slug}/claim', Api::route([ClaimController::class, 'store']), ['api-auth']);

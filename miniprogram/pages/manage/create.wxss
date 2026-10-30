@@ -1,0 +1,60 @@
+.is-error {
+  border-color: #b4534b;
+}
+
+.error {
+  display: block;
+  margin-top: 8rpx;
+  color: #b4534b;
+  font-size: 22rpx;
+}
+
+.hint {
+  display: block;
+  margin-top: 8rpx;
+  color: #8a7f70;
+  font-size: 22rpx;
+}
+
+.picker-value {
+  line-height: 88rpx;
+}
+
+.textarea {
+  min-height: 160rpx;
+  padding: 20rpx 24rpx;
+  line-height: 1.6;
+}
+
+.more-toggle {
+  margin: 8rpx 0 32rpx;
+  color: #3f5a4c;
+  font-size: 24rpx;
+}
+
+.declaration {
+  display: flex;
+  align-items: flex-start;
+  margin: 24rpx 0 8rpx;
+  padding: 24rpx;
+  background: #fffdf8;
+  border: 1rpx solid #e2d9c9;
+  border-radius: 12rpx;
+}
+
+.declaration-text {
+  flex: 1;
+  margin-left: 16rpx;
+  color: #6b6257;
+  font-size: 22rpx;
+  line-height: 1.6;
+}
+
+.footnote {
+  display: block;
+  margin-top: 24rpx;
+  color: #8a7f70;
+  font-size: 22rpx;
+  line-height: 1.6;
+  text-align: center;
+}
