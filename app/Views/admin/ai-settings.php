@@ -187,4 +187,4 @@ $err = static fn (string $key): string => isset($errors[$key]) ? '<p class="fiel
     </div>
 </section>
 
-<script src="/assets/js/admin-ai-settings.js" defer></script>
+<script src="/assets/js/admin-ai-settings.js?v=2" defer></script>
