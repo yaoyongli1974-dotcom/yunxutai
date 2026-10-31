@@ -79,7 +79,7 @@ final class AiStudioService
             throw new RuntimeException('原照片文件缺失');
         }
 
-        $client = AiClientFactory::make();
+        $client = AiClientFactory::makeFor('image');
         if ($client !== null) {
             $bytes = $client->restoreImage(
                 $source,
@@ -117,7 +117,7 @@ final class AiStudioService
     private static function runArticle(array $job, array $memorial, array $deceased, array $input): void
     {
         $events = LifeEvent::forMemorial((int) $memorial['id']);
-        $client = AiClientFactory::make();
+        $client = AiClientFactory::makeFor('text');
         $name = (string) $deceased['full_name'];
 
         if ($client !== null) {
@@ -167,7 +167,7 @@ final class AiStudioService
         }
 
         $events = LifeEvent::forMemorial((int) $memorial['id']);
-        $client = AiClientFactory::make();
+        $client = AiClientFactory::makeFor('text');
         if ($client !== null) {
             $storyboardText = $client->generateText(
                 '你是纪念短片的分镜编辑。根据提供的照片说明与生平时间轴，写 4–6 句简短、克制的中文字幕，'
@@ -212,7 +212,7 @@ final class AiStudioService
         $photos = Media::visible((int) $memorial['id'], true);
         $photos = array_values(array_filter($photos, static fn (array $m): bool => $m['kind'] === 'photo'));
 
-        $client = AiClientFactory::make();
+        $client = AiClientFactory::makeFor('text');
         if ($client !== null) {
             $preface = $client->generateText(
                 '你是一位家族档案编辑。请写一段 300–500 字的中文档案前言，说明这份档案依据哪些资料整理、'

@@ -108,24 +108,63 @@ $err = static fn (string $key): string => isset($errors[$key]) ? '<p class="fiel
                             <input type="text" name="image_model" list="ai-model-options" value="<?= e($field('image_model')) ?>" placeholder="gpt-image-1" maxlength="80">
                             <?= $err('image_model') ?>
                         </label>
+                    </div>
+
+                    <fieldset class="field admin-subpanel ai-video-group">
+                        <legend class="field__label">视频独立凭证（预留，可选）</legend>
+                        <p class="muted small">留空即可完全跟随上方主凭证。纪念短片目前仍由 ffmpeg 本地合成，本组用于未来接入 AI 直出视频服务时单独配置地址 / Key / 模型。</p>
                         <label class="field">
-                            <span class="field__label">视频模型（预留：AI 直出纪念短片）</span>
-                            <input type="text" name="video_model" list="ai-model-options" value="<?= e($field('video_model')) ?>" placeholder="如 sora-2 / 国内视频生成模型 ID" maxlength="80">
-                            <span class="muted small">当前纪念短片由 ffmpeg 本地合成；填入后未来 AI 视频能力将使用该模型。</span>
+                            <span class="field__label">视频组运行模式（当前生效：<?= e($cfg['video_provider']) ?>）</span>
+                            <select name="video_provider">
+                                <option value="" <?= ($old['video_provider'] ?? $cfg['video_provider_custom']) === '' ? 'selected' : '' ?>>跟随主组运行模式</option>
+                                <option value="demo" <?= ($old['video_provider'] ?? $cfg['video_provider_custom']) === 'demo' ? 'selected' : '' ?>>demo · 强制本地/演示</option>
+                                <option value="openai" <?= ($old['video_provider'] ?? $cfg['video_provider_custom']) === 'openai' ? 'selected' : '' ?>>openai · 独立 API</option>
+                            </select>
+                            <?= $err('video_provider') ?>
+                        </label>
+                        <label class="field">
+                            <span class="field__label">
+                                视频 API 基础地址
+                                <em class="muted small">（生效：<?= e($cfg['video_base_url_effective'] !== '' ? $cfg['video_base_url_effective'] : '跟随主组') ?>）</em>
+                            </span>
+                            <input type="url" name="video_base_url" id="ai-video-base-url" value="<?= e(($old['video_base_url'] ?? '') !== '' ? $old['video_base_url'] : (string) ($cfg['video_base_url'] ?? '')) ?>" placeholder="<?= e($cfg['video_base_url_effective'] !== '' ? $cfg['video_base_url_effective'] : 'https://api.openai.com/v1') ?>">
+                            <button type="button" class="button button--small button--ghost" id="ai-fetch-video-models">获取视频模型列表</button>
+                            <span id="ai-video-models-status" class="muted small" aria-live="polite"></span>
+                            <?= $err('video_base_url') ?>
+                        </label>
+                        <label class="field">
+                            <span class="field__label">
+                                视频 API Key
+                                <em class="muted small">（当前：<?= $cfg['video_key_set'] ? '已配置，来自' . e($cfg['video_key_from']) . ' · ****' . e($cfg['video_key_tail']) : '未配置（请求时跟随主组）' ?>）</em>
+                            </span>
+                            <input type="password" name="video_api_key" value="" autocomplete="off" placeholder="<?= $cfg['video_key_set'] ? '留空则保持现有密钥' : '留空跟随主组 Key；或独立填写' ?>">
+                            <label class="checkbox-row">
+                                <input type="checkbox" name="clear_video" value="1">
+                                <span class="muted small">清空独立视频组（provider/地址/Key/模型全部回退主组）</span>
+                            </label>
+                            <?= $err('video_api_key') ?>
+                        </label>
+                        <label class="field">
+                            <span class="field__label">
+                                视频模型
+                                <em class="muted small">（生效：<?= e($cfg['video_model_effective'] !== '' ? $cfg['video_model_effective'] : '未设置') ?>）</em>
+                            </span>
+                            <input type="text" name="video_model" list="ai-video-model-options" value="<?= e(($old['video_model'] ?? '') !== '' ? $old['video_model'] : (string) ($cfg['video_model'] ?? '')) ?>" placeholder="如 sora-2 / 国内视频生成模型 ID" maxlength="80">
                             <?= $err('video_model') ?>
                         </label>
-                        <label class="field">
-                            <span class="field__label">每人每馆每日任务上限（1–100）</span>
-                            <input type="number" name="daily_limit" value="<?= (int) $field('daily_limit', '10') ?>" min="1" max="100">
-                            <?= $err('daily_limit') ?>
-                        </label>
-                    </div>
+                        <datalist id="ai-video-model-options"></datalist>
+                    </fieldset>
 
                     <div class="grid-2">
                         <label class="field">
                             <span class="field__label">接口超时（秒，10–600）</span>
                             <input type="number" name="timeout" value="<?= (int) $field('timeout', '120') ?>" min="10" max="600">
                             <?= $err('timeout') ?>
+                        </label>
+                        <label class="field">
+                            <span class="field__label">每人每馆每日任务上限（1–100）</span>
+                            <input type="number" name="daily_limit" value="<?= (int) $field('daily_limit', '10') ?>" min="1" max="100">
+                            <?= $err('daily_limit') ?>
                         </label>
                         <label class="field">
                             <span class="field__label">任务执行方式</span>
@@ -150,35 +189,45 @@ $err = static fn (string $key): string => isset($errors[$key]) ? '<p class="fiel
 
 <script>
 (function () {
-  var btn = document.getElementById('ai-fetch-models');
-  if (!btn) return;
-  btn.addEventListener('click', function () {
-    var status = document.getElementById('ai-models-status');
-    var list = document.getElementById('ai-model-options');
-    status.textContent = '获取中…';
-    var fd = new FormData();
-    fd.append('base_url', (document.getElementById('ai-base-url') || {}).value || '');
-    var keyInput = document.querySelector('input[name="api_key"]');
-    if (keyInput && keyInput.value) { fd.append('api_key', keyInput.value); }
-    fd.append('_token', (document.querySelector('input[name="_token"]') || {}).value || '');
-    fetch('<?= e(url('/admin/ai-settings/models')) ?>', { method: 'POST', body: fd })
-      .then(function (r) { return r.json().then(function (j) { return { code: r.status, j: j }; }); })
-      .then(function (r) {
-        if (r.code !== 200 || !r.j.models) {
-          status.textContent = '获取失败：' + ((r.j && r.j.message) || ('HTTP ' + r.code));
-          return;
-        }
-        list.innerHTML = '';
-        (r.j.models || []).forEach(function (m) {
-          if (!m || !m.id) return;
-          var o = document.createElement('option');
-          o.value = m.id;
-          if (m.owned_by) { o.label = m.owned_by; }
-          list.appendChild(o);
-        });
-        status.textContent = '获取到 ' + list.children.length + ' 个模型，可直接点输入框选择。';
-      })
-      .catch(function (e) { status.textContent = '获取失败：' + e; });
+  var config = [
+    { domain: '', btn: 'ai-fetch-models', list: 'ai-model-options', status: 'ai-models-status', base: 'ai-base-url', keyInput: 'input[name="api_key"]' },
+    { domain: 'video', btn: 'ai-fetch-video-models', list: 'ai-video-model-options', status: 'ai-video-models-status', base: 'ai-video-base-url', keyInput: 'input[name="video_api_key"]' }
+  ];
+  config.forEach(function (item) {
+    var btn = document.getElementById(item.btn);
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var status = document.getElementById(item.status);
+      var list = document.getElementById(item.list);
+      if (!status || !list) return;
+      status.textContent = '获取中…';
+      var fd = new FormData();
+      fd.append('domain', item.domain);
+      var base = document.getElementById(item.base);
+      if (base && base.value) { fd.append('base_url', base.value); }
+      var keyInput = document.querySelector(item.keyInput);
+      if (keyInput && keyInput.value) { fd.append('api_key', keyInput.value); }
+      var token = document.querySelector('input[name="_token"]');
+      if (token) { fd.append('_token', token.value); }
+      fetch('<?= e(url('/admin/ai-settings/models')) ?>', { method: 'POST', body: fd })
+        .then(function (r) { return r.json().then(function (j) { return { code: r.status, j: j }; }); })
+        .then(function (r) {
+          if (r.code !== 200 || !r.j.models) {
+            status.textContent = '获取失败：' + ((r.j && r.j.message) || ('HTTP ' + r.code));
+            return;
+          }
+          list.innerHTML = '';
+          (r.j.models || []).forEach(function (m) {
+            if (!m || !m.id) return;
+            var o = document.createElement('option');
+            o.value = m.id;
+            if (m.owned_by) { o.label = m.owned_by; }
+            list.appendChild(o);
+          });
+          status.textContent = '获取到 ' + list.children.length + ' 个模型，可直接点输入框选择。';
+        })
+        .catch(function (e) { status.textContent = '获取失败：' + e; });
+    });
   });
 })();
 </script>

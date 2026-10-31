@@ -41,8 +41,12 @@ final class AiServiceController
         $this->guard();
 
         $post = $request->post;
+        $domain = ($post['domain'] ?? '') === 'video' ? 'video' : '';
+        $storedBase = $domain === 'video'
+            ? (string) (config('ai.video.base_url', '') ?: config('ai.base_url', ''))
+            : (string) config('ai.base_url', '');
         $rawBase = trim((string) ($post['base_url'] ?? ''));
-        $baseUrl = $rawBase !== '' ? rtrim($rawBase, '/') : rtrim((string) config('ai.base_url', ''), '/');
+        $baseUrl = $rawBase !== '' ? rtrim($rawBase, '/') : rtrim($storedBase, '/');
         if ($baseUrl === '') {
             $baseUrl = 'https://api.openai.com/v1';
         }
@@ -50,10 +54,12 @@ final class AiServiceController
             return Response::json(['message' => 'API 基础地址无效，请先填写合法 URL'], 422);
         }
 
-        $key = trim((string) config('ai.api_key', ''));
-        $typedKey = trim((string) ($post['api_key'] ?? ''));
-        if ($typedKey !== '') {
-            $key = $typedKey;
+        $storedKey = $domain === 'video'
+            ? (string) (config('ai.video.api_key', '') ?: config('ai.api_key', ''))
+            : (string) config('ai.api_key', '');
+        $key = trim((string) ($post['api_key'] ?? ''));
+        if ($key === '') {
+            $key = trim($storedKey);
         }
         if ($key === '') {
             return Response::json(['message' => '尚未配置 API Key（或本次表单中填写后未保存）。可先在下方填写 Key 并保存，或直接重试。'], 422);
@@ -163,6 +169,43 @@ final class AiServiceController
         $enabled = (bool) ($post['enabled'] ?? false);
         $sync = (bool) ($post['sync'] ?? true);
 
+        // —— 视频独立组（双凭证：主组服务文本+图像，视频可单独一套，留空=回退主组）——
+        $videoClear = (bool) ($post['clear_video'] ?? false);
+        $videoProvider = trim((string) ($post['video_provider'] ?? ''));
+        $videoModel = trim((string) ($post['video_model'] ?? ''));
+        if ($videoProvider !== '' && !in_array($videoProvider, ['demo', 'openai'], true)) {
+            $errors['video_provider'] = '视频组运行模式只能是「跟随主组」/ demo / openai';
+        }
+        $videoBaseUrl = rtrim(trim((string) ($post['video_base_url'] ?? '')), '/');
+        if ($videoBaseUrl !== '' && filter_var($videoBaseUrl, FILTER_VALIDATE_URL) === false) {
+            $errors['video_base_url'] = '视频独立地址必须是合法 URL';
+        }
+        $videoApiKey = trim((string) ($post['video_api_key'] ?? ''));
+        if (mb_strlen($videoApiKey) > 191) {
+            $errors['video_api_key'] = '视频 API Key 过长';
+        }
+        // 仅当用户显式配置了视频组字段时，才要求三件套齐备（否则继承主组，调用时再校验）。
+        if (!$videoClear && $videoProvider === 'openai') {
+            if ($videoModel === '' && (string) config('ai.video_model', '') === '') {
+                $errors['video_model'] = '视频组 openai 模式需要一个模型名';
+            }
+            if ($videoBaseUrl === '' && ((string) config('ai.video.base_url', '') === '' && (string) config('ai.base_url', '') === '')) {
+                $errors['video_base_url'] = '视频组 openai 模式需要一个基础地址';
+            }
+            if ($videoApiKey === '' && (trim((string) Settings::get('ai.video.api_key', config('ai.api_key', ''))) === '' && trim((string) config('ai.api_key', '')) === '')) {
+                $errors['video_api_key'] = '视频组 openai 模式需要一个 API Key';
+            }
+        }
+        if ($videoClear) {
+            // 清空动作：四键全部回退主组/环境，后续非空值可重新写入。
+            if ($videoProvider !== '' || $videoBaseUrl !== '' || $videoModel !== '') {
+                $errors['video_provider'] = '已勾选「清空视频组」，请去掉其他新填值再提交';
+            }
+        }
+        if (!$videoClear && mb_strlen($videoModel) > 80) {
+            $errors['video_model'] = '视频模型名不能超过 80 字符';
+        }
+
         if ($errors !== []) {
             return View::render('admin/ai-settings', array_merge($this->settingsViewData(), [
                 'errors' => $errors,
@@ -177,10 +220,6 @@ final class AiServiceController
         }
         Settings::set('ai.text_model', $textModel !== '' ? $textModel : (string) config('ai.text_model'));
         Settings::set('ai.image_model', $imageModel !== '' ? $imageModel : (string) config('ai.image_model'));
-        $videoModel = trim((string) ($post['video_model'] ?? ''));
-        if ($videoModel !== '') {
-            Settings::set('ai.video_model', $videoModel);
-        }
         Settings::set('ai.timeout', (string) $timeout);
         Settings::set('ai.daily_limit', (string) $dailyLimit);
         Settings::set('ai.sync', $sync ? '1' : '0');
@@ -190,12 +229,37 @@ final class AiServiceController
             Settings::set('ai.api_key', $apiKey);
         }
 
+        if ($videoClear) {
+            Settings::set('ai.video.provider', null);
+            Settings::set('ai.video.base_url', null);
+            Settings::set('ai.video.api_key', null);
+            Settings::set('ai.video.model', null);
+        } else {
+            if ($videoProvider !== '') {
+                Settings::set('ai.video.provider', $videoProvider);
+            }
+            if ($videoBaseUrl !== '') {
+                Settings::set('ai.video.base_url', $videoBaseUrl);
+            }
+            if ($videoApiKey !== '') {
+                Settings::set('ai.video.api_key', $videoApiKey);
+            }
+            if ($videoModel !== '') {
+                Settings::set('ai.video.model', $videoModel);
+            }
+        }
+
         Audit::log('admin.ai_settings_updated', 'platform_settings', null, [
             'provider' => $provider,
             'enabled' => $enabled,
             'sync' => $sync,
             'daily_limit' => $dailyLimit,
             'api_key_changed' => $apiKey !== '' || $clearKey,
+            'video_group_changed' => $videoClear
+                || $apiKey !== ''
+                || $videoProvider !== ''
+                || $videoBaseUrl !== ''
+                || $videoModel !== '',
         ]);
 
         Flash::success('AI 设置已保存并即时生效。密钥仅服务端存储，不会出现在页面与审计日志。');
@@ -207,6 +271,7 @@ final class AiServiceController
      */
     private function settingsViewData(): array
     {
+        $videoKeyRaw = trim((string) (config('ai.video.api_key', '') ?: config('ai.api_key', '')));
         return [
             'title' => 'AI 大模型设置',
             'noindex' => true,
@@ -224,6 +289,16 @@ final class AiServiceController
                 'api_key_set' => trim((string) config('ai.api_key', '')) !== '',
                 'api_key_tail' => mb_substr(trim((string) config('ai.api_key', '')), -4),
                 'api_key_from' => Settings::get('ai.api_key') !== null ? '设置' : '环境变量',
+                // 视频独立组（生效值），空=继承主组
+                'video_provider' => (string) (config('ai.video.provider', '') ?: config('ai.provider', 'demo')),
+                'video_provider_custom' => (string) config('ai.video.provider', ''),
+                'video_base_url' => (string) config('ai.video.base_url', ''),
+                'video_base_url_effective' => (string) (config('ai.video.base_url', '') ?: config('ai.base_url', '')),
+                'video_model' => (string) config('ai.video.model', ''),
+                'video_model_effective' => (string) (config('ai.video.model', '') ?: config('ai.video_model', '')),
+                'video_key_set' => trim((string) config('ai.video.api_key', '')) !== '' || trim((string) config('ai.api_key', '')) !== '',
+                'video_key_tail' => $videoKeyRaw !== '' ? mb_substr($videoKeyRaw, -4) : '',
+                'video_key_from' => Settings::get('ai.video.api_key') !== null ? '设置·视频' : (Settings::get('ai.api_key') !== null ? '主组' : '环境变量'),
             ],
             'jobsTotal' => AiJob::count(),
             'jobsFailed' => AiJob::count('failed'),

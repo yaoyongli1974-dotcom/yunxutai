@@ -246,6 +246,14 @@ try {
     );
     echo "✓ platform_settings 表已就绪（后台设置覆盖环境变量）\n";
 
+    // 双凭证改造清理：旧的文本/图像独立域键（ai.text.* / ai.image.*）不再受支持，幂等删除并回退主组。
+    $staleDomains = Db::query(
+        "DELETE FROM platform_settings WHERE name LIKE 'ai.text.%' OR name LIKE 'ai.image.%'"
+    )->rowCount();
+    if ($staleDomains > 0) {
+        echo "✓ 已清理 {$staleDomains} 行历史 ai.text.*/ai.image.* 设置（按主组回退）\n";
+    }
+
     if ($wasVerificationColumnMissing || $forceGrandfather) {
         if ($forceGrandfather) {
             $affected = Db::query(

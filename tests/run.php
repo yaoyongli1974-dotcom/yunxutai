@@ -731,6 +731,66 @@ test('后台 AI 大模型设置读写与校验', function (): void {
     check(in_array($probe['status'], [502, 422], true), '不可达地址应 502/422，实际 ' . $probe['status']);
     check(!str_contains((string) $probe['body'], 'sk-model-list-probe'), '响应不得回显 Key');
 
+    // 视频组：非法独立 provider → 422
+    $token3 = csrf_token('/admin/ai-settings');
+    $badVideo = http('POST', '/admin/ai-settings', [
+        '_token' => $token3,
+        'provider' => 'demo',
+        'enabled' => '1',
+        'sync' => '1',
+        'video_provider' => 'sora',
+        'timeout' => '120',
+        'daily_limit' => '10',
+    ], [], false);
+    check($badVideo['status'] === 422, '非法视频独立 provider 应 422，实际 ' . $badVideo['status']);
+
+    // 视频组合法保存：四键独立落库
+    $okVideo = http('POST', '/admin/ai-settings', [
+        '_token' => $token3,
+        'provider' => 'demo',
+        'enabled' => '1',
+        'sync' => '1',
+        'video_provider' => 'openai',
+        'video_base_url' => 'https://video.example-proxy.com/v1',
+        'video_api_key' => 'sk-test-video-key',
+        'video_model' => 'sora-2',
+        'timeout' => '120',
+        'daily_limit' => '10',
+    ], [], false);
+    check($okVideo['status'] === 302, '视频组保存应 302，实际 ' . $okVideo['status']);
+    foreach ([
+        'ai.video.provider' => 'openai',
+        'ai.video.base_url' => 'https://video.example-proxy.com/v1',
+        'ai.video.api_key' => 'sk-test-video-key',
+        'ai.video.model' => 'sora-2',
+    ] as $name => $expect) {
+        $row = Db::fetch('SELECT value FROM platform_settings WHERE name = ?', [$name]);
+        check($row !== null && $row['value'] === $expect, "{$name} 未按预期落库");
+    }
+    $page3 = http('GET', '/admin/ai-settings');
+    check_contains($page3['body'], '已配置，来自设置·视频', '视频组掩码提示缺失');
+    check_contains($page3['body'], 'video.example-proxy.com', '视频组生效地址未回显');
+    check_contains($page3['body'], 'sora-2', '视频组生效模型未回显');
+    check_contains($page3['body'], 'ai-fetch-video-models', '缺少视频域获取模型按钮');
+    check_contains($page3['body'], 'clear_video', '缺少视频组清空复选');
+
+    // 视频组清空：四键全部回退主组
+    $token4 = csrf_token('/admin/ai-settings');
+    $clearVideo = http('POST', '/admin/ai-settings', [
+        '_token' => $token4,
+        'provider' => 'demo',
+        'enabled' => '1',
+        'sync' => '1',
+        'clear_video' => '1',
+        'timeout' => '120',
+        'daily_limit' => '10',
+    ], [], false);
+    check($clearVideo['status'] === 302, 'clear_video 保存应 302，实际 ' . $clearVideo['status']);
+    $left = Db::fetchAll("SELECT name FROM platform_settings WHERE name LIKE 'ai.video.%'");
+    check(count($left) === 0, 'clear_video 后视频组键未清空：' . json_encode($left));
+    $page4 = http('GET', '/admin/ai-settings');
+    check(!str_contains((string) $page4['body'], '已配置，来自设置·视频'), '清空后视频组不应再显示独立密钥提示');
+
     try {
         // 页面状态断言结束：清理设置回 env 默认，供后续用例使用 demo 默认
     } finally {

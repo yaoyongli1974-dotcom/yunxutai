@@ -184,6 +184,19 @@ if (config('ai.enabled')) {
     if (!is_file((string) config('ai.ffmpeg'))) {
         warn('ffmpeg 不存在：' . config('ai.ffmpeg') . '；纪念短片无法生成');
     }
+    $video = (array) config('ai.video', []);
+    $videoProvider = (string) ($video['provider'] ?? '');
+    if ($videoProvider === '') {
+        $videoProvider = $provider;
+    }
+    if ($videoProvider === 'openai') {
+        $videoKey = trim((string) ($video['api_key'] ?? '')) !== ''
+            ? trim((string) ($video['api_key'] ?? ''))
+            : trim((string) config('ai.api_key', ''));
+        if ($videoKey === '') {
+            warn('视频组运行模式为 openai，但视频 Key 与主组 Key 均为空；AI 直出视频将失败（当前仍可用 ffmpeg 合成）');
+        }
+    }
     try {
         \App\Core\Db::value('SELECT COUNT(*) FROM ai_services');
     } catch (\Throwable $e) {
