@@ -1,5 +1,5 @@
 {
-  "description": "静思园小程序示例配置：复制为 project.config.json，并把 appid 换成你自己的小程序 AppID（此处留空，请勿提交真实 AppID）。",
+  "description": "云叙台小程序示例配置：复制为 project.config.json，并把 appid 换成你自己的小程序 AppID（此处留空，请勿提交真实 AppID）。",
   "appid": "",
   "projectname": "jidian-miniprogram",
   "compileType": "miniprogram",

@@ -110,7 +110,7 @@ php bin/ai-worker.php --limit=3
 ```dotenv
 MAIL_DRIVER=smtp
 MAIL_LOG_PATH=/srv/jidian/storage/logs/mail.log
-MAIL_FROM_NAME="静思园"
+MAIL_FROM_NAME="云叙台"
 MAIL_FROM_ADDRESS=no-reply@memorial.example.com
 
 MAIL_SMTP_HOST=smtp.example.com

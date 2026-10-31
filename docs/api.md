@@ -1,4 +1,4 @@
-# 静思园小程序 JSON API（`/api/v1`）
+# 云叙台小程序 JSON API（`/api/v1`）
 
 面向微信小程序（及任何 JSON 客户端）的只读/轻交互接口层。它复用 web 端同一套 `users` / `memorials` / `tributes` / `messages` 数据与 `Policy` 权限策略，不引入第二套业务规则。
 

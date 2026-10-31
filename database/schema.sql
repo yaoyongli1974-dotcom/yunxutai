@@ -1,4 +1,4 @@
--- 静思园 · 网络纪念平台
+-- 云叙台 · 网络纪念平台
 -- MySQL 8.4 LTS / MariaDB 10.11+ compatible, utf8mb4
 SET NAMES utf8mb4;
 

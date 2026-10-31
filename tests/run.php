@@ -255,7 +255,7 @@ function db_count(string $table, string $where = '1 = 1', array $params = []): i
     return (int) Db::value("SELECT COUNT(*) FROM {$table} WHERE {$where}", $params);
 }
 
-echo "静思园 · 集成测试\n";
+echo "云叙台 · 集成测试\n";
 echo "目标：{$baseUrl}\n\n";
 
 echo "[单元测试]\n";
@@ -1375,9 +1375,9 @@ test('TOTP 算法自洽与 RFC 6238 向量', function (): void {
     check(!Totp::verifyCode('not-base32', '123456'), '非法密钥应拒绝');
 
     $uri = Totp::otpauthUri('admin@example.com', $secret);
-    check(str_starts_with($uri, 'otpauth://totp/' . rawurlencode('静思园:admin@example.com') . '?'), 'otpauth 标签编码不正确');
+    check(str_starts_with($uri, 'otpauth://totp/' . rawurlencode('云叙台:admin@example.com') . '?'), 'otpauth 标签编码不正确');
     check_contains($uri, 'secret=' . $secret, 'otpauth 缺少密钥');
-    check_contains($uri, 'issuer=静思园', 'otpauth 缺少发行方');
+    check_contains($uri, 'issuer=云叙台', 'otpauth 缺少发行方');
     check_contains($uri, 'digits=6', 'otpauth 位数不正确');
     check_contains($uri, 'period=30', 'otpauth 周期不正确');
 
@@ -1598,7 +1598,7 @@ test('RedisSessionHandler 读写销毁往返（mock Redis）', function (): void
     $client = new RespClient($server->url(), static fn (): mixed => $server->pump());
     try {
         $handler = new RedisSessionHandler($client, 'test:session:');
-        $payload = 'uid|i:42;name|s:9:"静思园测试";';
+        $payload = 'uid|i:42;name|s:9:"云叙台测试";';
 
         check($handler->open(sys_get_temp_dir(), 'PHPSESSID') === true, 'open 应为 true');
         check($handler->write('abc123', $payload) === true, 'write 应为 true');
@@ -1686,8 +1686,8 @@ test('Notify log 驱动生成可解析邮件', function (): void {
     Notify::configure(['driver' => 'log', 'log_path' => $path]);
 
     try {
-        $body = "第一行正文\n第二行：静思园";
-        check(Notify::send('notify@example.com', '静思园·邀请测试', $body), '合法邮箱应发送成功');
+        $body = "第一行正文\n第二行：云叙台";
+        check(Notify::send('notify@example.com', '云叙台·邀请测试', $body), '合法邮箱应发送成功');
 
         clearstatcache();
         check(is_file($path), '应写入日志文件');
@@ -1699,7 +1699,7 @@ test('Notify log 驱动生成可解析邮件', function (): void {
         check_contains($raw, 'Content-Transfer-Encoding: base64', '缺少传输编码');
 
         check(preg_match('/^Subject: (.+)$/m', $raw, $matches) === 1, '缺少 Subject 头');
-        check(mb_decode_mimeheader(trim($matches[1])) === '静思园·邀请测试', 'Subject 应可按 RFC2047 解码');
+        check(mb_decode_mimeheader(trim($matches[1])) === '云叙台·邀请测试', 'Subject 应可按 RFC2047 解码');
 
         $parts = preg_split('/\r?\n\r?\n/', trim($raw), 2);
         check(count($parts) === 2, '缺少头部与正文分隔');

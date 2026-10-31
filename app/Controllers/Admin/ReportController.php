@@ -182,7 +182,7 @@ final class ReportController
 
             Notify::send(
                 $contact,
-                '静思园·举报处理结果',
+                '云叙台·举报处理结果',
                 "您好：\n\n"
                 . '您提交的举报（编号 #' . (int) $report['id'] . "）已处理完毕。\n\n"
                 . '受理类型：' . $targetTypeLabel . '（' . report_reason_label((string) $report['reason']) . "）\n"
@@ -190,7 +190,7 @@ final class ReportController
                 . '处理结论：' . $resolution . "\n\n"
                 . "本邮件仅告知处理结果，不包含被举报内容详情。如有疑问，请联系 "
                 . (string) config('app.support_email', 'support@example.com') . "。\n"
-                . '——静思园'
+                . '——云叙台'
             );
         }
 

@@ -25,7 +25,7 @@ if (!preg_match('/^[a-zA-Z0-9_]+$/', $dbName)) {
     exit(1);
 }
 
-echo "静思园 · 安装程序\n";
+echo "云叙台 · 安装程序\n";
 echo "数据库：{$dbName}\n\n";
 
 // 生成 .env（仅在不存在时）

@@ -119,13 +119,13 @@ final class MemberController extends BaseController
             $roleLabel = $role === 'editor' ? '协作者' : '只读成员';
             Notify::send(
                 $email,
-                '静思园·纪念馆邀请',
+                '云叙台·纪念馆邀请',
                 "您好：\n\n"
                 . '您被邀请加入「' . $memorial['title'] . '」纪念馆，角色：' . $roleLabel . "。\n\n"
                 . "请在 7 天内通过以下链接接受邀请：\n"
                 . $inviteUrl . "\n\n"
                 . "如非本人预期，请忽略本邮件。\n"
-                . "——静思园"
+                . "——云叙台"
             );
         }
 

@@ -39,7 +39,7 @@ function fail(string $message): void
     $errors[] = $message;
 }
 
-echo "静思园 · 上线自检\n\n";
+echo "云叙台 · 上线自检\n\n";
 
 if (version_compare(PHP_VERSION, '8.4.0', '>=')) {
     ok('PHP 版本 ' . PHP_VERSION);

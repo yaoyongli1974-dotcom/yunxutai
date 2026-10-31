@@ -40,7 +40,7 @@
 
         <div style="margin:1.2rem 0;">
             <p style="margin:0 0 0.45rem;">1. 打开身份验证器 App（如 Google Authenticator、Microsoft Authenticator、1Password），选择「手动输入密钥」。</p>
-            <p class="small muted" style="margin:0 0 0.45rem;">账号：静思园　类型：基于时间（TOTP）　位数：6　周期：30 秒</p>
+            <p class="small muted" style="margin:0 0 0.45rem;">账号：云叙台　类型：基于时间（TOTP）　位数：6　周期：30 秒</p>
             <p style="margin:0 0 0.35rem;">密钥：</p>
             <code style="display:block;padding:0.7rem 0.85rem;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper-deep);word-break:break-all;font-size:0.95rem;"><?= e((string) $pendingSecret) ?></code>
             <p class="small muted" style="margin:0.75rem 0 0.35rem;">也可以复制下面的 otpauth 地址，在支持 URI 的验证器中导入：</p>

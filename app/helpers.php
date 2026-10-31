@@ -213,7 +213,7 @@ function anonymous_display(bool|int $anonymous): string
 
 function page_title(string $title): string
 {
-    $name = (string) config('app.name', '静思园');
+    $name = (string) config('app.name', '云叙台');
     return $title === '' ? $name : $title . ' · ' . $name;
 }
 

@@ -1,6 +1,6 @@
 <article>
     <div class="shell page-head">
-        <p class="eyebrow">关于静思园</p>
+        <p class="eyebrow">关于云叙台</p>
         <h1>一个安放记忆的地方，不是橱窗</h1>
         <p class="page-head__meta">记取来时路，安放未尽言。</p>
     </div>
@@ -8,7 +8,7 @@
     <div class="section--tight" style="padding-bottom:1rem;">
         <div class="shell">
             <div class="prose prose--page" style="font-size:0.98rem;">
-                <p>静思园是一家面向普通家庭的网络纪念平台。我们为逝去的亲人提供长期保存的纪念馆：生平与影像、家族的故事、亲友的祭奠与留言，都放在同一处。</p>
+                <p>云叙台是一家面向普通家庭的网络纪念平台。我们为逝去的亲人提供长期保存的纪念馆：生平与影像、家族的故事、亲友的祭奠与留言，都放在同一处。</p>
                 <p>我们相信纪念这件事有自己的分量——它应当安静、具体、经得起岁月。所以这里没有香火排行榜，没有积分与徽章，不推送广告，也不引诱你充值更多。祭奠是免费的，想写多长写多短都随你。</p>
             </div>
         </div>

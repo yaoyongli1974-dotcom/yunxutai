@@ -2,7 +2,7 @@
     <div class="auth-card">
         <p class="eyebrow">二次验证</p>
         <h1>输入动态验证码</h1>
-        <p class="auth-card__lead">密码已通过。请打开身份验证器 App，输入「静思园」当前的 6 位动态码。</p>
+        <p class="auth-card__lead">密码已通过。请打开身份验证器 App，输入「云叙台」当前的 6 位动态码。</p>
 
         <?php if (!empty($errors['form'])): ?>
             <div class="form-error" role="alert" style="margin-bottom:1.2rem;">

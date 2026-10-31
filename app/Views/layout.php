@@ -16,7 +16,7 @@ $navCurrent = function (string $prefix): string {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <title><?= e($pageTitle) ?></title>
-    <meta name="description" content="<?= e($metaDescription ?? '静思园——为逝去的亲人建立一座安静的纪念馆。记取来时路，安放未尽言。') ?>">
+    <meta name="description" content="<?= e($metaDescription ?? '云叙台——为逝去的亲人建立一座安静的纪念馆。记取来时路，安放未尽言。') ?>">
     <?php if ($isNoindex): ?>
         <meta name="robots" content="noindex, nofollow">
     <?php endif; ?>

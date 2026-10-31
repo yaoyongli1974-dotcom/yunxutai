@@ -70,9 +70,9 @@ final class Totp
      */
     public static function otpauthUri(string $account, string $secret): string
     {
-        return 'otpauth://totp/' . rawurlencode('静思园:' . $account)
+        return 'otpauth://totp/' . rawurlencode('云叙台:' . $account)
             . '?secret=' . rawurlencode($secret)
-            . '&issuer=静思园&algorithm=SHA1&digits=' . self::DIGITS . '&period=' . self::PERIOD;
+            . '&issuer=云叙台&algorithm=SHA1&digits=' . self::DIGITS . '&period=' . self::PERIOD;
     }
 
     private static function base32Encode(string $bytes): string

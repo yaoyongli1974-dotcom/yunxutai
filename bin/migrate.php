@@ -63,7 +63,7 @@ function constraintExists(string $database, string $table, string $constraint): 
     ) > 0;
 }
 
-echo "静思园 · 数据库迁移\n数据库：{$database}\n\n";
+echo "云叙台 · 数据库迁移\n数据库：{$database}\n\n";
 
 try {
     if (!columnExists($database, 'users', 'totp_secret')) {

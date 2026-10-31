@@ -8,7 +8,7 @@ if ($appKey === false || $appKey === '') {
 
 return [
     'app' => [
-        'name'        => getenv('APP_NAME') ?: '静思园',
+        'name'        => getenv('APP_NAME') ?: '云叙台',
         'tagline'     => '记取来时路，安放未尽言',
         'url'         => rtrim((string) (getenv('APP_URL') ?: ''), '/'),
         'env'         => getenv('APP_ENV') ?: 'local',
@@ -22,7 +22,7 @@ return [
         // log=追加邮件文本到日志（默认，开发/兜底）；smtp=真实发信；none=停用。
         'driver'          => getenv('MAIL_DRIVER') ?: 'log',
         'log_path'        => getenv('MAIL_LOG_PATH') ?: BASE_PATH . '/storage/logs/mail.log',
-        'from_name'       => getenv('MAIL_FROM_NAME') ?: '静思园',
+        'from_name'       => getenv('MAIL_FROM_NAME') ?: '云叙台',
         'from_address'    => getenv('MAIL_FROM_ADDRESS') ?: 'no-reply@example.com',
         'smtp_host'       => getenv('MAIL_SMTP_HOST') ?: '',
         'smtp_port'       => (int) (getenv('MAIL_SMTP_PORT') ?: 587),

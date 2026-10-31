@@ -473,14 +473,14 @@ final class AiStudioService
             . 'figure{margin:0;background:#fffdf8;border:1px solid #e3dccd;padding:.5rem}figure img{width:100%;height:auto;display:block}'
             . 'figcaption{font-size:.82rem;color:#6b7168;margin-top:.4rem}footer{margin-top:3rem;color:#777;font-size:.8rem}'
             . '</style></head><body><main>'
-            . '<p class="meta">静思园 · 家族数字档案</p><h1>' . $escape($name) . '</h1>'
+            . '<p class="meta">云叙台 · 家族数字档案</p><h1>' . $escape($name) . '</h1>'
             . '<p class="meta">' . $escape((string) ($deceased['birth_date'] ?? '')) . ' — ' . $escape((string) ($deceased['death_date'] ?? '')) . '</p>'
             . '<div class="lede">' . nl2br($escape($preface)) . '</div>'
             . '<h2>生平</h2><p>' . nl2br($escape((string) ($deceased['bio'] ?? '尚待补充'))) . '</p>'
             . '<h2>时间轴</h2>' . ($timeline !== '' ? '<ul class="timeline">' . $timeline . '</ul>' : '<p>尚待补充。</p>')
             . '<h2>纪念文章</h2>' . ($articleHtml !== '' ? $articleHtml : '<p>尚待补充。</p>')
             . '<h2>照片目录</h2>' . ($photoHtml !== '' ? '<div class="photos">' . $photoHtml . '</div>' : '<p>尚待补充。</p>')
-            . '<footer>本档案由静思园 AI 工作室辅助整理，内容需家属核对。生成时间：' . $escape($generated) . '。'
+            . '<footer>本档案由云叙台 AI 工作室辅助整理，内容需家属核对。生成时间：' . $escape($generated) . '。'
             . '档案仅用于家庭纪念，不构成对逝者身份或史实的官方证明。</footer>'
             . '</main></body></html>';
     }
