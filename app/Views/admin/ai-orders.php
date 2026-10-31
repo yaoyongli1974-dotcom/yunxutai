@@ -24,10 +24,18 @@ $filters = [
     'rejected' => '已驳回',
 ];
 ?>
-<section class="admin-section">
-    <p class="eyebrow">AI 付费订单</p>
-    <h2>收款确认与驳回</h2>
-    <p class="muted small">订单审核制：馆主提交后平台人工核价并确认收款，确认后自动生成 AI 任务（不占每日免费额度）。驳回需填写说明，馆内会看到处理结果。</p>
+<section class="section">
+    <div class="shell admin-shell">
+        <?php App\Core\View::partial('admin/_nav', ['active' => 'ai-orders']); ?>
+        <div class="admin-main">
+            <div class="admin-page-head">
+                <div>
+                    <p class="eyebrow">AI 付费订单</p>
+                    <h1>收款确认与驳回</h1>
+                    <p class="muted small">订单审核制：馆主提交后平台人工核价并确认收款，确认后自动生成 AI 任务（不占每日免费额度）。驳回需填写说明，馆内会看到处理结果。</p>
+                </div>
+                <a class="button button--small button--ghost" href="<?= e(url('/admin/ai-settings')) ?>">费用模式设置</a>
+            </div>
 
     <nav class="admin-tabs" aria-label="订单过滤">
         <?php foreach ($filters as $key => $label): ?>
@@ -109,4 +117,6 @@ $filters = [
     <?php endif; ?>
 
     <p class="admin-note muted small">合规提示：订单确认即记账并生成任务；未确认前不扣费、不生成内容。请在隐私政策与服务条款中保持「收款后生成 / 未确认可全额取消」的一致表述。</p>
+        </div>
+    </div>
 </section>

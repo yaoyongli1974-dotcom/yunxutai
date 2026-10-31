@@ -1627,6 +1627,34 @@ fieldset.field { border: 0; margin: 0; }
 .admin-nav nav { display: grid; gap: 0.15rem; }
 .admin-nav nav a:hover { background: var(--paper-deep); color: var(--ink); }
 .admin-nav nav a[aria-current="page"] { background: var(--ink); color: var(--paper); }
+
+/* 分组折叠：原生 details，无需 JS */
+.admin-nav__group { border: 0; margin: 0.15rem 0; }
+.admin-nav__group > summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: var(--radius);
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    user-select: none;
+}
+.admin-nav__group > summary::-webkit-details-marker { display: none; }
+.admin-nav__group > summary::after {
+    content: "＋";
+    font-size: 0.72rem;
+    color: var(--muted);
+    transition: transform 0.2s var(--ease);
+}
+.admin-nav__group[open] > summary::after { content: "－"; }
+.admin-nav__group > summary:hover { background: var(--paper-deep); color: var(--ink); }
+.admin-nav__group > nav { padding: 0.1rem 0 0.35rem 0.35rem; }
+.admin-nav__group[open] > summary { color: var(--accent-deep); }
 .admin-nav__note, .manage-backlink { margin: 1rem 0 0; padding-top: 0.9rem; border-top: 1px solid var(--line); font-size: 0.76rem; line-height: 1.65; }
 .manage-public { margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--line); font-size: 0.8rem; }
 .manage-public a { color: var(--accent-deep); word-break: break-all; }
