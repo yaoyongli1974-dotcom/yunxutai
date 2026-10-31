@@ -246,6 +246,35 @@ try {
     );
     echo "✓ platform_settings 表已就绪（后台设置覆盖环境变量）\n";
 
+    Db::query(
+        "CREATE TABLE IF NOT EXISTS ai_orders (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            memorial_id BIGINT UNSIGNED NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            service_slug VARCHAR(40) NOT NULL,
+            service_name VARCHAR(80) NOT NULL,
+            price_cents INT UNSIGNED NOT NULL,
+            input_json JSON DEFAULT NULL,
+            status ENUM('pending','paid','rejected','cancelled') NOT NULL DEFAULT 'pending',
+            task_id BIGINT UNSIGNED DEFAULT NULL,
+            payment_ref VARCHAR(190) DEFAULT NULL,
+            note VARCHAR(500) DEFAULT NULL,
+            paid_at DATETIME DEFAULT NULL,
+            reviewed_by BIGINT UNSIGNED DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_ai_orders_status (status, created_at),
+            KEY idx_ai_orders_user (user_id, created_at),
+            KEY idx_ai_orders_memorial (memorial_id, created_at),
+            CONSTRAINT fk_ai_orders_memorial FOREIGN KEY (memorial_id) REFERENCES memorials (id) ON DELETE CASCADE,
+            CONSTRAINT fk_ai_orders_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+            CONSTRAINT fk_ai_orders_task FOREIGN KEY (task_id) REFERENCES ai_jobs (id) ON DELETE SET NULL,
+            CONSTRAINT fk_ai_orders_reviewer FOREIGN KEY (reviewed_by) REFERENCES users (id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    echo "✓ ai_orders 表已就绪（AI 付费订单，收款确认后开任务）\n";
+
     // 双凭证改造清理：旧的文本/图像独立域键（ai.text.* / ai.image.*）不再受支持，幂等删除并回退主组。
     $staleDomains = Db::query(
         "DELETE FROM platform_settings WHERE name LIKE 'ai.text.%' OR name LIKE 'ai.image.%'"

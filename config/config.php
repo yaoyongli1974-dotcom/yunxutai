@@ -82,6 +82,7 @@ return [
         'timeout' => (int) (getenv('AI_TIMEOUT') ?: 120),
         'daily_limit' => (int) (getenv('AI_DAILY_LIMIT') ?: 10),
         'sync' => filter_var(getenv('AI_SYNC') ?: 'true', FILTER_VALIDATE_BOOL),
+        'charging' => filter_var(getenv('AI_CHARGING') ?: 'false', FILTER_VALIDATE_BOOL),
         'ffmpeg' => getenv('FFMPEG_BIN') ?: '/usr/bin/ffmpeg',
     ],
     'storage' => [

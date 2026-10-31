@@ -14,6 +14,7 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\View;
 use App\Models\AiJob;
+use App\Models\AiOrder;
 use App\Models\AiService;
 use App\Models\Media;
 use App\Models\Memorial;
@@ -64,10 +65,13 @@ final class AiController
             return Response::redirect($this->base($memorial) . '/ai');
         }
 
-        $limit = max(1, (int) config('ai.daily_limit', 10));
-        if (!RateLimiter::hit('ai:' . (int) $user['id'] . ':' . (int) $memorial['id'], $limit, 86400)) {
-            Flash::error('今天的 AI 生成次数已用完，请明天再试，或联系平台处理。');
-            return Response::redirect($this->base($memorial) . '/ai');
+        if (!(bool) config('ai.charging', false)) {
+            // 免费模式才计入每日次数；付费订单待平台确认收款后单独生成任务，不占免费额度。
+            $limit = max(1, (int) config('ai.daily_limit', 10));
+            if (!RateLimiter::hit('ai:' . (int) $user['id'] . ':' . (int) $memorial['id'], $limit, 86400)) {
+                Flash::error('今天的 AI 生成次数已用完，请明天再试，或联系平台处理。');
+                return Response::redirect($this->base($memorial) . '/ai');
+            }
         }
 
         $input = ['notes' => mb_substr(trim((string) $request->input('notes', '')), 0, 1200)];
@@ -88,6 +92,23 @@ final class AiController
             };
         } catch (HttpException $e) {
             Flash::error($e->getMessage());
+            return Response::redirect($this->base($memorial) . '/ai');
+        }
+
+        // 充电模式（订单审核制）：不直接生成任务，先创建待确认订单。
+        if ((bool) config('ai.charging', false)) {
+            $orderId = AiOrder::create(
+                (int) $memorial['id'],
+                (int) $user['id'],
+                $service,
+                $input
+            );
+            Audit::log('ai.order_created', 'ai_order', $orderId, [
+                'service' => $slug,
+                'memorial_id' => (int) $memorial['id'],
+                'price_cents' => (int) $service['price_cents'],
+            ]);
+            Flash::info('已生成付费订单（' . AiJob::yuan((int) $service['price_cents']) . '），平台确认收款后开始生成；未确认前不扣费、不产生任务。');
             return Response::redirect($this->base($memorial) . '/ai');
         }
 

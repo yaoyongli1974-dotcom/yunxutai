@@ -962,6 +962,15 @@ fieldset.field { border: 0; margin: 0; }
     transition: border-color 0.25s var(--ease), background 0.25s var(--ease);
 }
 .field textarea { min-height: 8.5rem; resize: vertical; }
+.field input[type="radio"], .field input[type="checkbox"] {
+    width: auto;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    margin: 0;
+    accent-color: var(--accent-deep);
+}
 .field input:focus, .field textarea:focus, .field select:focus {
     outline: none;
     border-color: var(--accent);

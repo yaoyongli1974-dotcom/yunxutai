@@ -26,6 +26,7 @@ final class Settings
         'ai.timeout',
         'ai.daily_limit',
         'ai.sync',
+        'ai.charging',
         'ai.ffmpeg',
     ];
 
@@ -99,6 +100,7 @@ final class Settings
             switch ($field) {
                 case 'enabled':
                 case 'sync':
+                case 'charging':
                     $config['ai'][$field] = filter_var($raw, FILTER_VALIDATE_BOOL);
                     break;
                 case 'timeout':

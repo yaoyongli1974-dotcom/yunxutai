@@ -51,6 +51,32 @@ CREATE TABLE IF NOT EXISTS wx_identities (
     CONSTRAINT fk_wx_identities_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS ai_orders (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    memorial_id BIGINT UNSIGNED NOT NULL,
+    user_id BIGINT UNSIGNED NOT NULL,
+    service_slug VARCHAR(40) NOT NULL,
+    service_name VARCHAR(80) NOT NULL,
+    price_cents INT UNSIGNED NOT NULL,
+    input_json JSON DEFAULT NULL,
+    status ENUM('pending','paid','rejected','cancelled') NOT NULL DEFAULT 'pending',
+    task_id BIGINT UNSIGNED DEFAULT NULL,
+    payment_ref VARCHAR(190) DEFAULT NULL,
+    note VARCHAR(500) DEFAULT NULL,
+    paid_at DATETIME DEFAULT NULL,
+    reviewed_by BIGINT UNSIGNED DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_ai_orders_status (status, created_at),
+    KEY idx_ai_orders_user (user_id, created_at),
+    KEY idx_ai_orders_memorial (memorial_id, created_at),
+    CONSTRAINT fk_ai_orders_memorial FOREIGN KEY (memorial_id) REFERENCES memorials (id) ON DELETE CASCADE,
+    CONSTRAINT fk_ai_orders_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_ai_orders_task FOREIGN KEY (task_id) REFERENCES ai_jobs (id) ON DELETE SET NULL,
+    CONSTRAINT fk_ai_orders_reviewer FOREIGN KEY (reviewed_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS platform_settings (
     name VARCHAR(80) NOT NULL,
     value TEXT NOT NULL,

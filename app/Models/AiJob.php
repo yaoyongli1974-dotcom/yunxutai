@@ -7,6 +7,12 @@ use App\Core\Db;
 
 final class AiJob
 {
+    /** 分转人民币展示：9900 → ¥99.00。 */
+    public static function yuan(int $cents): string
+    {
+        return '¥' . number_format($cents / 100, 2, '.', '');
+    }
+
     public static function create(int $memorialId, int $userId, string $serviceSlug, array $input, int $costCents): int
     {
         return Db::insert('ai_jobs', [
