@@ -29,6 +29,64 @@ function url(string $path = ''): string
     return $base . '/' . ltrim($path, '/');
 }
 
+/**
+ * 页面规范链接（canonical）：始终使用 APP_URL 中的主机，去掉查询串，
+ * 避免 www 与裸域、?page= 等参数产生重复收录。
+ */
+function canonical_url(?string $path = null): string
+{
+    if ($path === null) {
+        $uri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+        $path = (string) (parse_url($uri, PHP_URL_PATH) ?: '/');
+    }
+    $path = '/' . trim(preg_replace('#/+#', '/', $path), '/');
+    $base = rtrim((string) config('app.url', ''), '/');
+    if ($base === '') {
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $base = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
+    }
+    return $base . ($path === '/' ? '/' : $path);
+}
+
+/**
+ * 私有/功能性页面：登录、后台、账户等，不应被搜索引擎收录。
+ */
+function is_private_path(?string $path = null): bool
+{
+    if ($path === null) {
+        $path = (string) (parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/');
+    }
+    foreach (['/admin', '/manage', '/account', '/dashboard', '/login', '/register', '/2fa', '/invitations', '/report', '/media', '/api'] as $prefix) {
+        if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * www 前缀域名应 301 到主域名时返回目标地址，否则返回 null。
+ * 主域名取自 APP_URL（含端口），因此反向代理/本地测试同样适用。
+ */
+function www_redirect_location(): ?string
+{
+    $base = rtrim((string) config('app.url', ''), '/');
+    if ($base === '') {
+        return null;
+    }
+    $appHost = strtolower((string) (parse_url($base, PHP_URL_HOST) ?: ''));
+    if ($appHost === '') {
+        return null;
+    }
+    $host = strtolower((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    $host = (string) preg_replace('/:\d+$/', '', $host);
+    if ($host !== 'www.' . $appHost) {
+        return null;
+    }
+    $uri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+    return $base . ($uri === '' ? '/' : $uri);
+}
+
 function asset(string $path): string
 {
     $relative = 'assets/' . ltrim($path, '/');

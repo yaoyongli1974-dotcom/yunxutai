@@ -333,6 +333,49 @@ test('sitemap 包含公开可收录纪念馆', function (): void {
     check_contains($response['body'], 'zhang-mingyuan');
 });
 
+test('sitemap 非空且包含静态公开页', function (): void {
+    $response = http('GET', '/sitemap.xml');
+    check($response['status'] === 200, 'sitemap 状态错误');
+    check_contains($response['body'], '<loc>');
+    check_contains($response['body'], '/memorials</loc>');
+    check_contains($response['body'], '/about</loc>');
+    check(strpos($response['body'], '<urlset') !== false, 'sitemap 根节点缺失');
+});
+
+test('robots.txt 可访问并声明 sitemap', function (): void {
+    $response = http('GET', '/robots.txt');
+    check($response['status'] === 200, 'robots.txt 状态错误，实际 ' . $response['status']);
+    check_contains($response['body'], 'User-agent: *');
+    check_contains($response['body'], 'Disallow: /admin');
+    check_contains($response['body'], 'Sitemap: ');
+    check_contains($response['body'], '/sitemap.xml');
+});
+
+test('公开页输出 canonical 链接', function (): void {
+    $base = rtrim((string) getenv('BASE_URL'), '/');
+    $home = http('GET', '/');
+    check_contains($home['body'], '<link rel="canonical" href="' . $base . '/">');
+    $about = http('GET', '/about');
+    check_contains($about['body'], '<link rel="canonical" href="' . $base . '/about">');
+});
+
+test('登录等私有页面不被收录', function (): void {
+    $login = http('GET', '/login');
+    check_contains($login['body'], '<meta name="robots" content="noindex, nofollow">');
+    check_not_contains($login['body'], 'rel="canonical"');
+});
+
+test('www 域名 301 跳转到主域名', function (): void {
+    $base = rtrim((string) getenv('BASE_URL'), '/');
+    $host = (string) parse_url($base, PHP_URL_HOST);
+    $headers = (string) shell_exec(
+        'curl -sS -o /dev/null -D - --max-time 10 -H ' . escapeshellarg('Host: www.' . $host)
+        . ' ' . escapeshellarg($base . '/about') . ' 2>&1'
+    );
+    check(stripos($headers, ' 301 ') !== false, 'www 域名应返回 301，响应头：' . $headers);
+    check(stripos($headers, 'Location: ' . $base . '/about') !== false, '跳转目标应为主域名');
+});
+
 test('首页与关于页说明身份核验', function (): void {
     $home = http('GET', '/');
     check_contains($home['body'], '公开之前，先核验身份');

@@ -41,6 +41,13 @@ date_default_timezone_set(config('app.timezone', 'Asia/Shanghai'));
 mb_internal_encoding('UTF-8');
 
 if (PHP_SAPI !== 'cli') {
+    // 双域名收敛：www 前缀 301 到 APP_URL 主域名（在开启会话前完成，避免 301 响应写 Cookie）。
+    $wwwLocation = www_redirect_location();
+    if ($wwwLocation !== null) {
+        header('Location: ' . $wwwLocation, true, 301);
+        exit;
+    }
+
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 

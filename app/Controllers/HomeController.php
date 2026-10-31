@@ -42,15 +42,17 @@ final class HomeController
 
     public function sitemap(Request $request): Response
     {
-        $base = rtrim((string) config('app.url', ''), '/');
-        if ($base === '') {
-            $scheme = (!empty($request->server['HTTPS']) && $request->server['HTTPS'] !== 'off') ? 'https' : 'http';
-            $base = $scheme . '://' . ($request->server['HTTP_HOST'] ?? 'localhost');
+        $base = $this->baseUrl();
+        $esc = static fn (string $value): string => htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+        // 静态公开页始终存在，保证 sitemap 不会因为尚无公开纪念馆而为空。
+        $urls = '';
+        foreach (['/', '/memorials', '/about', '/services', '/privacy', '/terms'] as $path) {
+            $urls .= '<url><loc>' . $esc($base . $path) . '</loc></url>';
         }
 
-        $urls = '';
         foreach (Memorial::indexable() as $memorial) {
-            $urls .= '<url><loc>' . e($base . '/m/' . $memorial['slug']) . '</loc>'
+            $urls .= '<url><loc>' . $esc($base . '/m/' . $memorial['slug']) . '</loc>'
                 . '<lastmod>' . date('Y-m-d', strtotime((string) $memorial['updated_at'])) . '</lastmod>'
                 . '</url>';
         }
@@ -59,5 +61,41 @@ final class HomeController
             . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . $urls . '</urlset>';
 
         return Response::text($xml)->withHeader('Content-Type', 'application/xml; charset=UTF-8');
+    }
+
+    public function robots(Request $request): Response
+    {
+        $base = $this->baseUrl();
+
+        $lines = [
+            'User-agent: *',
+            'Allow: /',
+            'Disallow: /admin',
+            'Disallow: /manage',
+            'Disallow: /account',
+            'Disallow: /dashboard',
+            'Disallow: /login',
+            'Disallow: /register',
+            'Disallow: /2fa',
+            'Disallow: /invitations',
+            'Disallow: /report',
+            'Disallow: /api/',
+            'Disallow: /media/',
+            '',
+            'Sitemap: ' . $base . '/sitemap.xml',
+            '',
+        ];
+
+        return Response::text(implode("\n", $lines));
+    }
+
+    private function baseUrl(): string
+    {
+        $base = rtrim((string) config('app.url', ''), '/');
+        if ($base !== '') {
+            return $base;
+        }
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        return $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
     }
 }

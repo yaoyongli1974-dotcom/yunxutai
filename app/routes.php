@@ -48,6 +48,7 @@ $router->get('/m/{slug}/tributes', [MemorialController::class, 'tributes']);
 $router->get('/m/{slug}/messages', [MemorialController::class, 'messages']);
 $router->get('/media/{id}', [MediaController::class, 'show']);
 $router->get('/sitemap.xml', [HomeController::class, 'sitemap']);
+$router->get('/robots.txt', [HomeController::class, 'robots']);
 
 $router->get('/about', [PageController::class, 'about']);
 $router->get('/privacy', [PageController::class, 'privacy']);

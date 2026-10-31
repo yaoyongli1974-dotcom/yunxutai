@@ -2,7 +2,7 @@
 $user = auth_user();
 $flashMessages = App\Core\Flash::pull();
 $pageTitle = page_title((string) ($title ?? ''));
-$isNoindex = (bool) ($noindex ?? false);
+$isNoindex = (bool) ($noindex ?? is_private_path());
 
 $navCurrent = function (string $prefix): string {
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
@@ -20,8 +20,11 @@ $navCurrent = function (string $prefix): string {
     <?php if ($isNoindex): ?>
         <meta name="robots" content="noindex, nofollow">
     <?php endif; ?>
-    <?php if (!empty($canonical)): ?>
-        <link rel="canonical" href="<?= e($canonical) ?>">
+<?php
+$canonicalUrl = $canonical ?? ($isNoindex ? null : canonical_url());
+?>
+    <?php if ($canonicalUrl !== null): ?>
+        <link rel="canonical" href="<?= e($canonicalUrl) ?>">
     <?php endif; ?>
     <link rel="stylesheet" href="<?= e(asset('css/app.css')) ?>">
 </head>
