@@ -58,6 +58,15 @@ $err = static fn (string $key): string => isset($errors[$key]) ? '<p class="fiel
                         </select>
                     </label>
 
+                    <label class="field">
+                        <span class="field__label">费用模式</span>
+                        <select name="charging">
+                            <option value="0" <?= !(bool) ($old['charging'] ?? $cfg['charging']) ? 'selected' : '' ?>>免费生成（内测，不扣费）</option>
+                            <option value="1" <?= (bool) ($old['charging'] ?? $cfg['charging']) ? 'selected' : '' ?>>收款后生成（订单确认制，默认关闭）</option>
+                        </select>
+                        <span class="field__hint muted small">开启后，馆主提交任务只生成待确认订单；平台在「AI 订单」确认收款后才创建任务。</span>
+                    </label>
+
                     <fieldset class="field">
                         <legend class="field__label">运行模式</legend>
                         <?php foreach ($presets as $value => $hint): ?>

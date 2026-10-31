@@ -281,6 +281,7 @@ final class AiServiceController
             'active' => 'ai-settings',
             'cfg' => [
                 'enabled' => (bool) config('ai.enabled', false),
+                'charging' => (bool) config('ai.charging', false),
                 'provider' => (string) config('ai.provider', 'demo'),
                 'base_url' => (string) config('ai.base_url', ''),
                 'text_model' => (string) config('ai.text_model', ''),
