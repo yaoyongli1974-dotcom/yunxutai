@@ -1,7 +1,7 @@
 <?php
 $user = auth_user();
 $flashMessages = App\Core\Flash::pull();
-$pageTitle = page_title((string) ($title ?? ''));
+$pageTitle = $fullTitle ?? page_title((string) ($title ?? ''));
 $isNoindex = (bool) ($noindex ?? is_private_path());
 
 $navCurrent = function (string $prefix): string {
@@ -26,6 +26,23 @@ $canonicalUrl = $canonical ?? ($isNoindex ? null : canonical_url());
     <?php if ($canonicalUrl !== null): ?>
         <link rel="canonical" href="<?= e($canonicalUrl) ?>">
     <?php endif; ?>
+    <?php
+    $shareUrl = $canonicalUrl ?? canonical_url();
+    $shareTitle = (string) ($ogTitle ?? $pageTitle);
+    $shareDescription = (string) ($ogDescription ?? $metaDescription ?? '云叙台——为逝去的亲人建立一座安静的纪念馆。记取来时路，安放未尽言。');
+    $shareImage = (string) ($ogImage ?? url('assets/og-cover.png'));
+    ?>
+    <meta property="og:site_name" content="<?= e((string) config('app.name')) ?>">
+    <meta property="og:type" content="<?= e($ogType ?? 'website') ?>">
+    <meta property="og:title" content="<?= e($shareTitle) ?>">
+    <meta property="og:description" content="<?= e($shareDescription) ?>">
+    <meta property="og:url" content="<?= e($shareUrl) ?>">
+    <meta property="og:image" content="<?= e($shareImage) ?>">
+    <meta property="og:locale" content="zh_CN">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="<?= e($shareTitle) ?>">
+    <meta name="twitter:description" content="<?= e($shareDescription) ?>">
+    <meta name="twitter:image" content="<?= e($shareImage) ?>">
     <link rel="stylesheet" href="<?= e(asset('css/app.css')) ?>">
 </head>
 <body class="<?= e($bodyClass ?? '') ?>">

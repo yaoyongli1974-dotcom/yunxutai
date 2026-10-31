@@ -16,6 +16,8 @@ final class HomeController
     {
         return View::render('home', [
             'title' => '',
+            'fullTitle' => '云叙台 · 网上纪念馆｜为逝去的亲人建一座纪念馆',
+            'metaDescription' => '云叙台是安静的网络纪念馆：为逝去的亲人建立纪念馆，记录生平、照片与亲友留言，经身份核验后公开供亲友追思。',
             'memorials' => Memorial::recentPublic(4),
             'summary' => Stats::publicSummary(),
         ]);

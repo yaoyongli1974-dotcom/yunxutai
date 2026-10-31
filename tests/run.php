@@ -359,6 +359,15 @@ test('公开页输出 canonical 链接', function (): void {
     check_contains($about['body'], '<link rel="canonical" href="' . $base . '/about">');
 });
 
+test('首页标题与分享元信息完整', function (): void {
+    $home = http('GET', '/');
+    check_contains($home['body'], '<title>云叙台 · 网上纪念馆｜为逝去的亲人建一座纪念馆</title>');
+    check_contains($home['body'], 'property="og:title"');
+    check_contains($home['body'], 'property="og:image" content="');
+    check_contains($home['body'], 'og-cover.png');
+    check_contains($home['body'], 'name="twitter:card" content="summary_large_image"');
+});
+
 test('登录等私有页面不被收录', function (): void {
     $login = http('GET', '/login');
     check_contains($login['body'], '<meta name="robots" content="noindex, nofollow">');

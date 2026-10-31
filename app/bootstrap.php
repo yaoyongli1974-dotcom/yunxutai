@@ -48,6 +48,9 @@ if (PHP_SAPI !== 'cli') {
         exit;
     }
 
+    // 不暴露 PHP 版本（等价 php.ini expose_php=Off，且无需重启 FPM）。
+    header_remove('X-Powered-By');
+
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 
@@ -91,9 +94,7 @@ if (PHP_SAPI !== 'cli') {
     header('Referrer-Policy: strict-origin-when-cross-origin');
     header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
     header("Content-Security-Policy: default-src 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
-    if ($secure) {
-        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
-    }
+    // HSTS 统一由边缘（deploy/nginx.conf 或 1Panel 站点配置）下发，应用层不再重复发送。
 }
 
 require BASE_PATH . '/app/error-handler.php';

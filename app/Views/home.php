@@ -53,7 +53,7 @@
     </div>
 </section>
 
-<?php $summaryData = $summary ?? []; ?>
+<?php $summaryData = array_filter($summary ?? [], static fn ($value): bool => (int) $value > 0); ?>
 <?php if ($summaryData !== []): ?>
 <section class="section section--tight" style="border-top:1px solid var(--line);">
     <div class="shell">
