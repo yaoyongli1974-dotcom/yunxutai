@@ -170,6 +170,8 @@ $router->post('/admin/services/{id}', [AdminServiceController::class, 'updateSta
 
 $router->get('/admin/ai-services', [AdminAiServiceController::class, 'index'], ['admin']);
 $router->post('/admin/ai-services/{id}', [AdminAiServiceController::class, 'update'], ['admin']);
+$router->get('/admin/ai-settings', [AdminAiServiceController::class, 'settings'], ['admin']);
+$router->post('/admin/ai-settings', [AdminAiServiceController::class, 'saveSettings'], ['admin']);
 $router->get('/admin/ai-jobs', [AdminAiJobController::class, 'index'], ['admin']);
 $router->post('/admin/ai-jobs/{id}/retry', [AdminAiJobController::class, 'retry'], ['admin']);
 

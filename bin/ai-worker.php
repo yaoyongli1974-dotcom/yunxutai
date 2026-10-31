@@ -19,6 +19,9 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
+// 与 web 端一致：后台 AI 设置覆盖 env 默认值。
+\App\Core\Settings::load();
+
 $options = getopt('', ['limit::']);
 $limit = max(1, min(20, (int) ($options['limit'] ?? 3)));
 

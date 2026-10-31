@@ -650,6 +650,86 @@ test('服务页明码标价且不卖虚拟祭品', function (): void {
     check_contains($response['body'], '不自动续费', '缺少续费说明');
 });
 
+test('后台 AI 大模型设置读写与校验', function (): void {
+    login('admin@example.com', 'TestAdmin@123');
+    $page = http('GET', '/admin/ai-settings');
+    check($page['status'] === 200, '后台 AI 设置页不可访问');
+    check_contains($page['body'], 'AI 大模型设置', '页面缺少标题');
+    check_contains($page['body'], 'API Key', '页面缺少密钥字段');
+
+    // 非法 provider 与超范围数值 → 422
+    $token = csrf_token('/admin/ai-settings');
+    $bad = http('POST', '/admin/ai-settings', [
+        '_token' => $token,
+        'provider' => 'midjourney',
+        'base_url' => 'https://api.openai.com/v1',
+        'text_model' => '',
+        'image_model' => '',
+        'timeout' => '1',
+        'daily_limit' => '0',
+    ]);
+    check($bad['status'] === 422, '非法 provider/数值应 422');
+    check_contains($bad['body'], '运行模式只能是', '错误信息缺失');
+
+    // openai 模式缺 Key → 422
+    $bad = http('POST', '/admin/ai-settings', [
+        '_token' => $token,
+        'provider' => 'openai',
+        'base_url' => 'https://api.openai.com/v1',
+        'text_model' => 'gpt-4.1-mini',
+        'image_model' => 'gpt-image-1',
+        'timeout' => '120',
+        'daily_limit' => '10',
+    ]);
+    check($bad['status'] === 422, 'openai 缺 Key 应 422');
+
+    // 正确保存 → 302 回设置页，DB 落库，内存 config 生效
+    $ok = http('POST', '/admin/ai-settings', [
+        '_token' => $token,
+        'provider' => 'openai',
+        'base_url' => 'https://api.example-proxy.com/v1/',
+        'api_key' => 'sk-test-abcdef123456',
+        'text_model' => 'gpt-4.1-mini',
+        'image_model' => 'gpt-image-1',
+        'timeout' => '90',
+        'daily_limit' => '7',
+        'sync' => '0',
+        'enabled' => '1',
+    ], [], false);
+    check($ok['status'] === 302, '保存应成功跳转，实际 ' . $ok['status']);
+    // CSRF token 是按页面路径缓存的：保存后重开设置页取新 token
+    $again = http('GET', '/admin/ai-settings');
+    check_contains($again['body'], '已配置，来自设置', '保存后未显示已配置状态');
+    check_contains($again['body'], 'api.example-proxy.com', '生效值未更新');
+    $row = Db::fetch("SELECT * FROM platform_settings WHERE name = 'ai.provider' LIMIT 1");
+    check($row !== null && $row['value'] === 'openai', 'platform_settings 未落库（provider）');
+    $sync = Db::fetch("SELECT * FROM platform_settings WHERE name = 'ai.sync' LIMIT 1");
+    check($sync !== null && $sync['value'] === '0', '执行方式未落库');
+
+    // demo 模式 + 清空 Key 一并保存，回退验证
+    $token2 = csrf_token('/admin/ai-settings');
+    $back = http('POST', '/admin/ai-settings', [
+        '_token' => $token2,
+        'provider' => 'demo',
+        'enabled' => '1',
+        'sync' => '1',
+        'clear_key' => '1',
+        'timeout' => '120',
+        'daily_limit' => '10',
+    ], [], false);
+    check($back['status'] === 302, '回退保存失败');
+    check(Db::fetch("SELECT * FROM platform_settings WHERE name = 'ai.api_key' LIMIT 1") === null, '清空 Key 后不应残留');
+    $page2 = http('GET', '/admin/ai-settings');
+    check(!str_contains((string) $page2['body'], '已配置，来自设置'), '清空后不应再显示设置源密钥');
+
+    try {
+        // 页面状态断言结束：清理设置回 env 默认，供后续用例使用 demo 默认
+    } finally {
+        Db::query("DELETE FROM platform_settings WHERE name LIKE 'ai.%'");
+        \App\Core\Settings::reset();
+    }
+});
+
 test('注册流程（含算术验证码）', function (): void {
     reset_session();
     $response = http('GET', '/register');

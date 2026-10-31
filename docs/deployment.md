@@ -85,6 +85,7 @@ FFMPEG_BIN=/usr/bin/ffmpeg
 ```
 
 - `demo` 不需要外部服务：照片用 GD 增强，文章/分镜用模板，短片用 ffmpeg 合成。
+- 以上 `AI_*` 变量只是默认值；**上线后在后台「AI 大模型设置」（`/admin/ai-settings`）可直接修改**，写入 `platform_settings` 表并即时覆盖 env（Key 只存服务端，页面与审计日志不含明文）。建议生产流程：.env 留 demo 默认 → 运营在后台切 openai 并填 Key/模型名 → worker 同样读取该表。
 - `openai` 会将用户上传的照片/生平文本发送到配置的 API；上线前需在隐私政策披露第三方处理、数据出境与撤回方式，并禁止发送核验材料/身份证件。
 - 异步队列：
 

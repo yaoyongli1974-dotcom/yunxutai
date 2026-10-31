@@ -65,6 +65,15 @@ if (PHP_SAPI !== 'cli') {
         );
     }
 
+    // 后台「AI 设置」等平台设置：DB 值覆盖 .env 默认（表不存在/未配置则静默跳过）。
+    if (is_file(BASE_PATH . '/app/Core/Settings.php')) {
+        try {
+            \App\Core\Settings::load();
+        } catch (\Throwable) {
+            // 数据库暂不可用时保持 env 默认值。
+        }
+    }
+
     session_start();
 
     header('X-Content-Type-Options: nosniff');

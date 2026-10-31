@@ -236,6 +236,16 @@ try {
     );
     echo "✓ wx_identities 表已就绪（openid ↔ 用户绑定）\n";
 
+    Db::query(
+        "CREATE TABLE IF NOT EXISTS platform_settings (
+            name VARCHAR(80) NOT NULL,
+            value TEXT NOT NULL,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    echo "✓ platform_settings 表已就绪（后台设置覆盖环境变量）\n";
+
     if ($wasVerificationColumnMissing || $forceGrandfather) {
         if ($forceGrandfather) {
             $affected = Db::query(
