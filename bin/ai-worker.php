@@ -19,7 +19,8 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
-// 与 web 端一致：后台 AI 设置覆盖 env 默认值。
+// 与 web 端一致：后台 AI 设置覆盖 env 默认值（每次启动重载，避免静态缓存残留）。
+\App\Core\Settings::reset();
 \App\Core\Settings::load();
 
 $options = getopt('', ['limit::']);

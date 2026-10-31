@@ -11,6 +11,7 @@ $navItems = [
     'services' => ['/admin/services', '服务申请'],
     'ai-services' => ['/admin/ai-services', 'AI 服务与价格'],
     'ai-settings' => ['/admin/ai-settings', 'AI 大模型设置'],
+    'ai-orders' => ['/admin/ai-orders', 'AI 订单'],
     'ai-jobs' => ['/admin/ai-jobs', 'AI 任务'],
     'users' => ['/admin/users', '用户'],
     'logs' => ['/admin/logs', '操作日志'],

@@ -31,7 +31,10 @@ function url(string $path = ''): string
 
 function asset(string $path): string
 {
-    return url('assets/' . ltrim($path, '/'));
+    $relative = 'assets/' . ltrim($path, '/');
+    $file = BASE_PATH . '/public/' . $relative;
+    $version = is_file($file) ? (string) filemtime($file) : APP_VERSION;
+    return url($relative) . '?v=' . rawurlencode($version);
 }
 
 function csrf_field(): string

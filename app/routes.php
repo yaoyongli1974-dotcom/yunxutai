@@ -6,6 +6,7 @@ use App\Controllers\Admin\ClaimController as AdminClaimController;
 use App\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Controllers\Admin\DataRequestController as AdminDataRequestController;
 use App\Controllers\Admin\AiJobController as AdminAiJobController;
+use App\Controllers\Admin\AiOrderController as AdminAiOrderController;
 use App\Controllers\Admin\AiServiceController as AdminAiServiceController;
 use App\Controllers\Admin\LogController as AdminLogController;
 use App\Controllers\Admin\MemorialController as AdminMemorialController;
@@ -173,6 +174,9 @@ $router->post('/admin/ai-services/{id}', [AdminAiServiceController::class, 'upda
 $router->get('/admin/ai-settings', [AdminAiServiceController::class, 'settings'], ['admin']);
 $router->post('/admin/ai-settings', [AdminAiServiceController::class, 'saveSettings'], ['admin']);
 $router->post('/admin/ai-settings/models', [AdminAiServiceController::class, 'models'], ['admin']);
+$router->get('/admin/ai-orders', [AdminAiOrderController::class, 'index'], ['admin']);
+$router->post('/admin/ai-orders/{id}/confirm', [AdminAiOrderController::class, 'confirm'], ['admin']);
+$router->post('/admin/ai-orders/{id}/reject', [AdminAiOrderController::class, 'reject'], ['admin']);
 $router->get('/admin/ai-jobs', [AdminAiJobController::class, 'index'], ['admin']);
 $router->post('/admin/ai-jobs/{id}/retry', [AdminAiJobController::class, 'retry'], ['admin']);
 

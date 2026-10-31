@@ -1986,6 +1986,100 @@ test('SMTP 不可达时 Notify 返回 false 且不抛错', function (): void {
     }
 });
 
+test('AI 收费订单（收款确认制）', function (): void {
+    // 1) 管理员在 AI 设置页开启收费
+    login('admin@example.com', 'TestAdmin@123');
+    $token = csrf_token('/admin/ai-settings');
+    $save = http('POST', '/admin/ai-settings', [
+        '_token' => $token,
+        'enabled' => '1',
+        'provider' => 'demo',
+        'text_model' => '',
+        'image_model' => '',
+        'timeout' => '120',
+        'daily_limit' => '10',
+        'sync' => '1',
+        'charging' => '1',
+    ], [], false);
+    check($save['status'] === 302, '开启收费应成功，实际 ' . $save['status']);
+    check((string) Db::value("SELECT value FROM platform_settings WHERE name = 'ai.charging'") === '1', '充电开关未落库');
+
+    // 2) 馆主提交修图任务 → 应生成 pending 订单，而非立刻建 job
+    $expectedCents = (int) Db::value("SELECT price_cents FROM ai_services WHERE slug = 'photo_restore'");
+    login('demo@example.com', 'Demo@123456');
+    $before = (int) Db::value('SELECT COUNT(*) FROM ai_jobs');
+    $photo = Db::fetch("SELECT id FROM media WHERE memorial_id = 1 AND kind = 'photo' ORDER BY id ASC LIMIT 1");
+    $tokenJob = csrf_token('/manage/memorials/1/ai');
+    $res = http('POST', '/manage/memorials/1/ai/jobs', [
+        '_token' => $tokenJob,
+        'service' => 'photo_restore',
+        'media_id' => (string) $photo['id'],
+        'consent' => '1',
+    ]);
+    check($res['status'] === 200, '订单流程任务提交失败，实际 ' . $res['status']);
+    $order = Db::fetch("SELECT * FROM ai_orders WHERE service_slug = 'photo_restore' ORDER BY id DESC LIMIT 1");
+    check($order !== null && $order['status'] === 'pending', '未生成 pending 订单');
+    check((int) $order['price_cents'] === $expectedCents, '订单价格快照错误：' . ($order['price_cents'] ?? '') . ' 期望 ' . $expectedCents);
+    check((int) Db::value('SELECT COUNT(*) FROM ai_jobs') === $before, '付费订单不应立即创建任务');
+    $studios = http('GET', '/manage/memorials/1/ai');
+    check_contains((string) $studios['body'], '收款确认制已开启', 'studio 页缺收费提示');
+    check_contains((string) $studios['body'], '待平台确认', 'studio 页缺订单状态');
+
+    // 3) 管理员在 AI 订单页确认收款 → 创建 job（cost=订单价）且订单 paid
+    login('admin@example.com', 'TestAdmin@123');
+    $orders = http('GET', '/admin/ai-orders');
+    check($orders['status'] === 200, '后台订单页不可访问');
+    check_contains((string) $orders['body'], 'photo_restore', '订单页未列出订单');
+    $tokenOrders = csrf_token('/admin/ai-orders');
+    $confirm = http('POST', '/admin/ai-orders/' . (int) $order['id'] . '/confirm', [
+        '_token' => $tokenOrders,
+        'payment_ref' => '测试收款单',
+    ], [], false);
+    check($confirm['status'] === 302, '确认收款应跳转，实际 ' . $confirm['status']);
+    $order = Db::fetch('SELECT * FROM ai_orders WHERE id = ?', [(int) $order['id']]);
+    check($order !== null && $order['status'] === 'paid', '订单未变 paid');
+    check($order['task_id'] !== null, '订单未关联任务');
+    check((string) $order['payment_ref'] === '测试收款单', '收款单号未保存');
+    $job = Db::fetch("SELECT * FROM ai_jobs WHERE id = ?", [(int) $order['task_id']]);
+    check($job !== null && (int) $job['cost_cents'] === $expectedCents, '任务金额快照错误');
+
+    // 4) 第二单走驳回：只允许 pending，驳回后不产生任务
+    login('demo@example.com', 'Demo@123456');
+    $jobsAfterPaid = (int) Db::value('SELECT COUNT(*) FROM ai_jobs');
+    $tokenJob = csrf_token('/manage/memorials/1/ai');
+    http('POST', '/manage/memorials/1/ai/jobs', [
+        '_token' => $tokenJob,
+        'service' => 'photo_restore',
+        'media_id' => (string) $photo['id'],
+        'consent' => '1',
+    ]);
+    $order2 = Db::fetch("SELECT * FROM ai_orders WHERE service_slug = 'photo_restore' ORDER BY id DESC LIMIT 1");
+    check($order2 !== null && (int) $order2['id'] !== (int) $order['id'], '未生成第二单');
+    check($order2['status'] === 'pending', '第二单应为 pending');
+    check((int) Db::value('SELECT COUNT(*) FROM ai_jobs') === $jobsAfterPaid, '第二单不应建任务');
+
+    login('admin@example.com', 'TestAdmin@123');
+    $tokenOrders = csrf_token('/admin/ai-orders');
+    $reject = http('POST', '/admin/ai-orders/' . (int) $order2['id'] . '/reject', [
+        '_token' => $tokenOrders,
+        'note' => '测试驳回',
+    ], [], false);
+    check($reject['status'] === 302, '驳回应跳转，实际 ' . $reject['status']);
+    $order2 = Db::fetch('SELECT * FROM ai_orders WHERE id = ?', [(int) $order2['id']]);
+    check($order2 !== null && $order2['status'] === 'rejected', '订单未变 rejected');
+    check((int) Db::value('SELECT COUNT(*) FROM ai_jobs') === $jobsAfterPaid, '驳回后不应新增任务');
+
+    // 收尾：清订单 / 任务，收费开关回退免费模式（settings 行一并删除）
+    try {
+        Db::query("DELETE FROM ai_orders WHERE memorial_id = 1 AND service_slug = 'photo_restore'");
+    } finally {
+        Db::query('DELETE FROM ai_jobs WHERE memorial_id = 1 AND cost_cents = :cost', ['cost' => $expectedCents]);
+        Db::query("DELETE FROM platform_settings WHERE name LIKE 'ai.%'");
+        \App\Core\Settings::reset();
+    }
+});
+
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

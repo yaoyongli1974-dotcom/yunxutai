@@ -81,6 +81,7 @@ AI_IMAGE_MODEL=gpt-image-1
 AI_TIMEOUT=120
 AI_DAILY_LIMIT=10
 AI_SYNC=false                 # 生产建议 false，交给 worker
+AI_CHARGING=false             # 收费订单（收款确认制）默认关闭；也可在后台 AI 设置页切换
 FFMPEG_BIN=/usr/bin/ffmpeg
 ```
 

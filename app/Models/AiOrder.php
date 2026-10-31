@@ -40,13 +40,19 @@ final class AiOrder
     public static function recent(int $limit = 50, ?string $status = null): array
     {
         $limit = max(1, min(200, $limit));
+        $sql = 'SELECT o.*, u.email AS user_email, u.display_name AS user_name,
+                       m.slug AS memorial_slug, d.full_name AS memorial_name
+                FROM ai_orders o
+                LEFT JOIN users u ON u.id = o.user_id
+                LEFT JOIN memorials m ON m.id = o.memorial_id
+                LEFT JOIN deceased d ON d.id = m.deceased_id';
+        $params = [];
         if ($status !== null && $status !== '') {
-            return Db::fetchAll(
-                'SELECT * FROM ai_orders WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ' . $limit,
-                [$status]
-            );
+            $sql .= ' WHERE o.status = ?';
+            $params[] = $status;
         }
-        return Db::fetchAll('SELECT * FROM ai_orders ORDER BY created_at DESC, id DESC LIMIT ' . $limit);
+        $sql .= ' ORDER BY o.created_at DESC, o.id DESC LIMIT ' . $limit;
+        return Db::fetchAll($sql, $params);
     }
 
     /**

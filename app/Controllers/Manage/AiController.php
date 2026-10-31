@@ -40,6 +40,8 @@ final class AiController
             'enabled' => AiClientFactory::enabled(),
             'mode' => AiClientFactory::label(),
             'limit' => (int) config('ai.daily_limit', 10),
+            'charging' => (bool) config('ai.charging', false),
+            'orders' => AiOrder::forMemorial((int) $memorial['id'], 10),
         ]);
     }
 

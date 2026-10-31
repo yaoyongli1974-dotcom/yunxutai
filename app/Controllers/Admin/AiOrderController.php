@@ -90,7 +90,7 @@ final class AiOrderController
             'task_id' => $jobId,
             'payment_ref' => $paymentRef,
             'paid_at' => date('Y-m-d H:i:s'),
-            'reviewed_by' => Auth::id(),
+            'reviewed_by' => ($actor = Auth::user()) !== null ? (int) $actor['id'] : null,
         ]);
         Audit::log('admin.ai_order_confirmed', 'ai_order', (int) $order['id'], [
             'service' => (string) $order['service_slug'],
@@ -124,7 +124,7 @@ final class AiOrderController
         AiOrder::update((int) $order['id'], [
             'status' => 'rejected',
             'note' => $note,
-            'reviewed_by' => Auth::id(),
+            'reviewed_by' => ($actor = Auth::user()) !== null ? (int) $actor['id'] : null,
         ]);
         Audit::log('admin.ai_order_rejected', 'ai_order', (int) $order['id'], [
             'service' => (string) $order['service_slug'],

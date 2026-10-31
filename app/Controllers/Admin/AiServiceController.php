@@ -168,6 +168,7 @@ final class AiServiceController
         }
         $enabled = (bool) ($post['enabled'] ?? false);
         $sync = (bool) ($post['sync'] ?? true);
+        $charging = (bool) ($post['charging'] ?? false);
 
         // —— 视频独立组（双凭证：主组服务文本+图像，视频可单独一套，留空=回退主组）——
         $videoClear = (bool) ($post['clear_video'] ?? false);
@@ -223,6 +224,7 @@ final class AiServiceController
         Settings::set('ai.timeout', (string) $timeout);
         Settings::set('ai.daily_limit', (string) $dailyLimit);
         Settings::set('ai.sync', $sync ? '1' : '0');
+        Settings::set('ai.charging', $charging ? '1' : '0');
         if ($clearKey) {
             Settings::set('ai.api_key', null);
         } elseif ($apiKey !== '') {
@@ -253,6 +255,7 @@ final class AiServiceController
             'provider' => $provider,
             'enabled' => $enabled,
             'sync' => $sync,
+            'charging' => $charging,
             'daily_limit' => $dailyLimit,
             'api_key_changed' => $apiKey !== '' || $clearKey,
             'video_group_changed' => $videoClear

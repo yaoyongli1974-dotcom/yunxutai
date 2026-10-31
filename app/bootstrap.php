@@ -68,6 +68,9 @@ if (PHP_SAPI !== 'cli') {
     // 后台「AI 设置」等平台设置：DB 值覆盖 .env 默认（表不存在/未配置则静默跳过）。
     if (is_file(BASE_PATH . '/app/Core/Settings.php')) {
         try {
+            // 常驻进程（php -S / php-fpm worker）里静态缓存会跨请求残留，
+            // 每次请求重新从 platform_settings 读取，保证后台改设置即时生效。
+            \App\Core\Settings::reset();
             \App\Core\Settings::load();
         } catch (\Throwable) {
             // 数据库暂不可用时保持 env 默认值。

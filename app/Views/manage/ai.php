@@ -184,5 +184,59 @@ $hasPhotos = $photos !== [];
                 </div>
             <?php endif; ?>
         </section>
+
+        <?php if ($charging): ?>
+            <div class="notice-card" style="margin-bottom:1.4rem;">
+                <p style="margin:0;">
+                    <strong>收款确认制已开启。</strong>
+                    提交任务会先生成付费订单，平台确认收款后才开始生成；未确认不扣费、不占每日提交次数。
+                </p>
+            </div>
+        <?php endif; ?>
+
+        <?php if ($charging && $orders !== []): ?>
+            <section class="manage-section" style="margin-top:1.6rem;">
+                <div class="manage-section__head" style="margin-bottom:.8rem;">
+                    <div>
+                        <h2>付费订单</h2>
+                        <p class="muted">待确认订单在平台后台确认收款后开始生成；未确认不扣费。</p>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead><tr><th>服务</th><th>金额</th><th>状态</th><th>结果</th><th>时间</th></tr></thead>
+                        <tbody>
+                        <?php
+                        $orderStatuses = [
+                            'pending' => ['待平台确认', 'chip--warn'],
+                            'paid' => ['已生成任务', 'chip--accent'],
+                            'rejected' => ['已驳回', ''],
+                            'cancelled' => ['已取消', ''],
+                        ];
+                        foreach ($orders as $order):
+                            [$label, $class] = $orderStatuses[(string) $order['status']] ?? [(string) $order['status'], ''];
+                        ?>
+                            <tr>
+                                <td><?= e($order['service_name']) ?></td>
+                                <td><?= e(\App\Models\AiJob::yuan((int) $order['price_cents'])) ?></td>
+                                <td><span class="chip <?= $class ?>"><?= e($label) ?></span></td>
+                                <td>
+                                    <?php if ((string) $order['status'] === 'paid' && $order['task_id']): ?>
+                                        <a href="<?= e(url($base . '/ai/jobs/' . (int) $order['task_id'])) ?>">查看 #<?= (int) $order['task_id'] ?></a>
+                                    <?php elseif ((string) $order['status'] === 'pending'): ?>
+                                        <span class="muted">等待平台确认</span>
+                                    <?php else: ?>
+                                        <?php $orderNote = trim((string) ($order['note'] ?? '')); ?>
+                                        <span class="muted"><?= $orderNote !== '' ? e($orderNote) : '—' ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="muted"><?= e(format_datetime((string) $order['created_at'])) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        <?php endif; ?>
     </div>
 </div>
