@@ -34,6 +34,20 @@
 
 * { box-sizing: border-box; }
 
+/* 自定义滚动条：跟随宣纸暖色系，避免浏览器默认灰条打断整体氛围 */
+html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+::-webkit-scrollbar-corner { background: transparent; }
+
 html {
     -webkit-text-size-adjust: 100%;
     scroll-behavior: smooth;
