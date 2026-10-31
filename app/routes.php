@@ -172,6 +172,7 @@ $router->get('/admin/ai-services', [AdminAiServiceController::class, 'index'], [
 $router->post('/admin/ai-services/{id}', [AdminAiServiceController::class, 'update'], ['admin']);
 $router->get('/admin/ai-settings', [AdminAiServiceController::class, 'settings'], ['admin']);
 $router->post('/admin/ai-settings', [AdminAiServiceController::class, 'saveSettings'], ['admin']);
+$router->post('/admin/ai-settings/models', [AdminAiServiceController::class, 'models'], ['admin']);
 $router->get('/admin/ai-jobs', [AdminAiJobController::class, 'index'], ['admin']);
 $router->post('/admin/ai-jobs/{id}/retry', [AdminAiJobController::class, 'retry'], ['admin']);
 

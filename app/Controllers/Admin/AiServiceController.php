@@ -32,6 +32,75 @@ final class AiServiceController
     }
 
     /**
+     * POST /admin/ai-settings/models — 用已存/生效的 Key 拉取 {base_url}/models。
+     * Key 只在服务端使用，不回传浏览器。失败返回 JSON {message}。
+     */
+    public function models(Request $request): Response
+    {
+        Csrf::verify($request);
+        $this->guard();
+
+        $post = $request->post;
+        $rawBase = trim((string) ($post['base_url'] ?? ''));
+        $baseUrl = $rawBase !== '' ? rtrim($rawBase, '/') : rtrim((string) config('ai.base_url', ''), '/');
+        if ($baseUrl === '') {
+            $baseUrl = 'https://api.openai.com/v1';
+        }
+        if (filter_var($baseUrl, FILTER_VALIDATE_URL) === false || !preg_match('#^https?://#i', $baseUrl)) {
+            return Response::json(['message' => 'API 基础地址无效，请先填写合法 URL'], 422);
+        }
+
+        $key = trim((string) config('ai.api_key', ''));
+        $typedKey = trim((string) ($post['api_key'] ?? ''));
+        if ($typedKey !== '') {
+            $key = $typedKey;
+        }
+        if ($key === '') {
+            return Response::json(['message' => '尚未配置 API Key（或本次表单中填写后未保存）。可先在下方填写 Key 并保存，或直接重试。'], 422);
+        }
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 12,
+                'ignore_errors' => true,
+                'header' => "Accept: application/json\r\nAuthorization: Bearer " . $key . "\r\n",
+            ],
+        ]);
+        $raw = @file_get_contents($baseUrl . '/models', false, $context);
+        if ($raw === false) {
+            return Response::json(['message' => '无法连接到 ' . $baseUrl . '，请检查地址与网络'], 502);
+        }
+
+        $payload = json_decode($raw, true);
+        if (!is_array($payload)) {
+            return Response::json(['message' => '服务返回的数据不是 JSON，请确认这是 OpenAI 兼容 API'], 502);
+        }
+        if (isset($payload['error'])) {
+            $message = (string) ($payload['error']['message'] ?? $payload['error']['code'] ?? '接口返回错误');
+            return Response::json(['message' => '接口返回错误：' . $message], 502);
+        }
+
+        $models = [];
+        $data = $payload['data'] ?? $payload['models'] ?? [];
+        if (is_array($data)) {
+            foreach ($data as $item) {
+                if (is_array($item) && isset($item['id']) && is_string($item['id']) && $item['id'] !== '') {
+                    $models[] = ['id' => $item['id'], 'owned_by' => $item['owned_by'] ?? null];
+                } elseif (is_string($item) && $item !== '') {
+                    $models[] = ['id' => $item, 'owned_by' => null];
+                }
+            }
+        }
+        usort($models, static fn (array $a, array $b): int => strcmp($a['id'], $b['id']));
+        if ($models === []) {
+            return Response::json(['message' => '接口未返回任何模型 ID（列表为空）'], 502);
+        }
+
+        return Response::json(['models' => $models]);
+    }
+
+    /**
      * GET /admin/ai-settings — AI 大模型设置（provider/密钥/模型/执行方式）。
      * console 键值存 platform_settings，覆盖 .env 默认。
      */
@@ -39,7 +108,10 @@ final class AiServiceController
     {
         $this->guard();
 
-        return View::render('admin/ai-settings', $this->settingsViewData());
+        return View::render('admin/ai-settings', array_merge($this->settingsViewData(), [
+            'old' => [],
+            'errors' => [],
+        ]));
     }
 
     public function saveSettings(Request $request): Response
@@ -105,6 +177,10 @@ final class AiServiceController
         }
         Settings::set('ai.text_model', $textModel !== '' ? $textModel : (string) config('ai.text_model'));
         Settings::set('ai.image_model', $imageModel !== '' ? $imageModel : (string) config('ai.image_model'));
+        $videoModel = trim((string) ($post['video_model'] ?? ''));
+        if ($videoModel !== '') {
+            Settings::set('ai.video_model', $videoModel);
+        }
         Settings::set('ai.timeout', (string) $timeout);
         Settings::set('ai.daily_limit', (string) $dailyLimit);
         Settings::set('ai.sync', $sync ? '1' : '0');
@@ -141,6 +217,7 @@ final class AiServiceController
                 'base_url' => (string) config('ai.base_url', ''),
                 'text_model' => (string) config('ai.text_model', ''),
                 'image_model' => (string) config('ai.image_model', ''),
+                'video_model' => (string) config('ai.video_model', ''),
                 'timeout' => (int) config('ai.timeout', 120),
                 'daily_limit' => (int) config('ai.daily_limit', 10),
                 'sync' => (bool) config('ai.sync', true),

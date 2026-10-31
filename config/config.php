@@ -77,6 +77,8 @@ return [
         'api_key' => (string) (getenv('AI_API_KEY') ?: ''),
         'text_model' => getenv('AI_TEXT_MODEL') ?: 'gpt-4.1-mini',
         'image_model' => getenv('AI_IMAGE_MODEL') ?: 'gpt-image-1',
+        // 预留：AI 直出视频模型（当前纪念短片由 ffmpeg 本地合成）
+        'video_model' => (string) (getenv('AI_VIDEO_MODEL') ?: ''),
         'timeout' => (int) (getenv('AI_TIMEOUT') ?: 120),
         'daily_limit' => (int) (getenv('AI_DAILY_LIMIT') ?: 10),
         'sync' => filter_var(getenv('AI_SYNC') ?: 'true', FILTER_VALIDATE_BOOL),

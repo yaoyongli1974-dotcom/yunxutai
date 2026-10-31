@@ -19,6 +19,7 @@ final class Settings
         'ai.api_key',
         'ai.text_model',
         'ai.image_model',
+        'ai.video_model',
         'ai.timeout',
         'ai.daily_limit',
         'ai.sync',

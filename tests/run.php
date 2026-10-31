@@ -722,6 +722,15 @@ test('后台 AI 大模型设置读写与校验', function (): void {
     $page2 = http('GET', '/admin/ai-settings');
     check(!str_contains((string) $page2['body'], '已配置，来自设置'), '清空后不应再显示设置源密钥');
 
+    // 模型列表探测：不可达地址 → 502 JSON，不回传 Key
+    $probe = http('POST', '/admin/ai-settings/models', [
+        '_token' => $token2,
+        'base_url' => 'https://127.0.0.1:9/v1',
+        'api_key' => 'sk-model-list-probe',
+    ]);
+    check(in_array($probe['status'], [502, 422], true), '不可达地址应 502/422，实际 ' . $probe['status']);
+    check(!str_contains((string) $probe['body'], 'sk-model-list-probe'), '响应不得回显 Key');
+
     try {
         // 页面状态断言结束：清理设置回 env 默认，供后续用例使用 demo 默认
     } finally {
