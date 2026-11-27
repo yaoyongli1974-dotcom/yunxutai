@@ -3049,6 +3049,119 @@ test('Round2 B：100 并发最多放行 10 次且不产生重复限流行', func
     \App\Core\RateLimiter::clear($key);
 });
 
+echo "\n[Round2 Phase 2：AI 工作流可靠性与 Provider 安全]\n";
+
+test('Round2 C：迁移字段、原子领取、fencing 与续租', function (): void {
+    foreach (['lock_version', 'heartbeat_at', 'last_error_at'] as $column) {
+        check((int) \App\Core\Db::value("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'ai_workflows' AND column_name = ?", [$column]) === 1, '缺少并发字段：' . $column);
+    }
+    $owner = make_family_user('r2-fence');
+    $familyId = \App\Services\FamilyService::create($owner, '并发家族', 'r2-fence-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'family_history_draft', ['text' => '并发测试资料']);
+
+    $claimed = \App\Services\AiWorkflowService::claimStrict('worker-A', 5);
+    $mine = null;
+    foreach ($claimed as $row) {
+        if ((int) $row['id'] === $id) { $mine = $row; break; }
+    }
+    check(is_array($mine), '任务未被严格领取');
+    check((int) $mine['lock_version'] >= 1, '领取未递增 lock_version');
+    check(\App\Services\AiWorkflowService::claimStrict('worker-B', 5) === [], '同一任务不应被第二个 Worker 领取');
+    check(!\App\Services\AiWorkflowService::heartbeat($id, 'worker-B', (int) $mine['lock_version']), '非持有者不应能续租');
+    check(!\App\Services\AiWorkflowService::heartbeat($id, 'worker-A', (int) $mine['lock_version'] + 1), '错误版本不应能续租');
+    check(\App\Services\AiWorkflowService::heartbeat($id, 'worker-A', (int) $mine['lock_version']), '持有者应能续租');
+    check(\App\Services\AiWorkflowService::owns($id, 'worker-A', (int) $mine['lock_version']), 'owns 应识别持有者');
+    check(!\App\Services\AiWorkflowService::owns($id, 'worker-old', (int) $mine['lock_version']), '旧 Worker 不应拥有任务');
+
+    // 旧 Worker 用过期版本提交不得完成任务。
+    try {
+        \App\Services\AiWorkflowService::process($id, 'worker-old', (int) $mine['lock_version'] - 1);
+        check(false, '旧 Worker 不应能提交结果');
+    } catch (Throwable $e) {
+        check(true, '旧 Worker 提交被拒绝');
+    }
+    check((string) \App\Core\Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) === 'processing', '旧 Worker 不应改变任务状态');
+    \App\Services\AiWorkflowService::process($id, 'worker-A', (int) $mine['lock_version']);
+    check((string) \App\Core\Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) === 'completed', '合法 Worker 应完成任务');
+});
+
+test('Round2 C：租约超时条件恢复与重试计数', function (): void {
+    $owner = make_family_user('r2-lease');
+    $familyId = \App\Services\FamilyService::create($owner, '租约家族', 'r2-lease-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'family_history_draft', ['text' => '租约测试']);
+    $claimed = \App\Services\AiWorkflowService::claimStrict('worker-lease', 5);
+    check(count($claimed) >= 1, '未领取到任务');
+    $before = (int) \App\Core\Db::value('SELECT lock_version FROM ai_workflows WHERE id = ?', [$id]);
+    \App\Core\Db::query("UPDATE ai_workflows SET lease_until = DATE_SUB(NOW(), INTERVAL 60 SECOND) WHERE id = ?", [$id]);
+    $recovered = \App\Services\AiWorkflowService::recoverExpired();
+    check($recovered['expired'] >= 1, '超时租约应被回收');
+    $after = (int) \App\Core\Db::value('SELECT lock_version FROM ai_workflows WHERE id = ?', [$id]);
+    check($after > $before, '恢复应递增 lock_version');
+    check((int) \App\Core\Db::value('SELECT retry_count FROM ai_workflows WHERE id = ?', [$id]) >= 1, '恢复应增加重试计数');
+    check(\App\Core\Db::value('SELECT last_error_at FROM ai_workflows WHERE id = ?', [$id]) !== null, '恢复应记录错误时间');
+    check((string) \App\Core\Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) === 'queued', '恢复后任务应可重试');
+});
+
+test('Round2 D：Provider 地址 SSRF 防护与错误分类', function (): void {
+    $client = 'App\\Services\\Ai\\ProcessingClient';
+    foreach ([
+        'http://provider.example.test/v1/ocr',
+        'http://localhost:8080/ocr',
+        'http://127.0.0.1/ocr',
+        'http://169.254.169.254/latest/meta-data/',
+        'https://user:pass@provider.test/ocr',
+        'https://10.0.0.5/ocr',
+        'https://[::1]/ocr',
+        'https://example.test:8443/ocr',
+    ] as $url) {
+        try {
+            $client::validateEndpoint($url);
+            check(false, '危险地址未被拒绝：' . $url);
+        } catch (\App\Services\Ai\ProcessingException $e) {
+            check(in_array($e->category, ['validation_error', 'dns_error', 'network_error'], true), '拒绝类别异常：' . $e->category);
+        }
+    }
+    $auth = new \App\Services\Ai\ProcessingException('auth_error', 'bad key');
+    $rate = new \App\Services\Ai\ProcessingException('rate_limited', 'slow down', true);
+    check(!$client::isRetryable($auth), 'auth_error 不应重试');
+    check($client::isRetryable($rate), 'rate_limited 应可有限重试');
+    check($client::isRetryable(new \App\Services\Ai\ProcessingException('server_error', 'oops', true)), '5xx 应可重试');
+});
+
+test('Round2 D：Provider 文件真实类型与大小校验', function (): void {
+    \App\Core\Settings::set('ai.ocr.enabled', '1');
+    \App\Core\Settings::set('ai.ocr.provider', 'custom');
+    \App\Core\Settings::set('ai.ocr.base_url', 'https://provider.test/v1');
+    \App\Core\Settings::set('ai.ocr.api_key', 'test-key');
+    $client = 'App\\Services\\Ai\\ProcessingClient';
+    $tmp = sys_get_temp_dir() . '/r2-provider-' . bin2hex(random_bytes(4)) . '.txt';
+    file_put_contents($tmp, 'not an image');
+    try {
+        $client::recognize('ocr', $tmp, 'image/jpeg');
+        check(false, '伪造 MIME 应被拒绝');
+    } catch (\App\Services\Ai\ProcessingException $e) {
+        check($e->category === 'unsupported_file', '文件类别应为 unsupported_file，实际 ' . $e->category);
+    }
+    try {
+        $client::recognize('ocr', $tmp . '.missing', 'image/jpeg');
+        check(false, '不存在文件应被拒绝');
+    } catch (\App\Services\Ai\ProcessingException $e) {
+        check($e->category === 'unsupported_file', '不存在文件类别错误');
+    }
+    @unlink($tmp);
+    \App\Core\Settings::reset();
+});
+
+test('Round2 C05：独立 Worker CLI 单次模式可运行', function (): void {
+    $cmd = 'cd ' . escapeshellarg(dirname(__DIR__)) . ' && timeout 25 php bin/ai-workflow-worker.php --once --limit=1 2>&1';
+    $output = [];
+    $code = 0;
+    exec($cmd, $output, $code);
+    check($code === 0, 'Worker 单次运行失败：' . implode(' ', array_slice($output, -3)));
+    check(is_file(dirname(__DIR__) . '/storage/logs/ai-workflow-worker.log'), 'Worker 日志未生成');
+    check(is_file(dirname(__DIR__) . '/deploy/ai-workflow-worker.service'), 'systemd 单元缺失');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

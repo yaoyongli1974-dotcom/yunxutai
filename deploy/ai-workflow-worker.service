@@ -1,0 +1,17 @@
+[Unit]
+Description=YunXuTai 2.0 AI Workflow Worker
+After=network.target mysql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/1panel/www/sites/yunxutai.cn/jidian
+ExecStart=/usr/bin/php bin/ai-workflow-worker.php --limit=5 --max-runtime=300
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=70
+StandardOutput=append:/opt/1panel/www/sites/yunxutai.cn/jidian/storage/logs/ai-workflow-worker-stdout.log
+StandardError=append:/opt/1panel/www/sites/yunxutai.cn/jidian/storage/logs/ai-workflow-worker-stderr.log
+
+[Install]
+WantedBy=multi-user.target

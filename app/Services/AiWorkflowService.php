@@ -95,77 +95,139 @@ final class AiWorkflowService
         return Db::fetchAll('SELECT * FROM ai_workflow_steps WHERE workflow_id = ? ORDER BY step_no', [$id]);
     }
 
-    /** Worker 原子领取：只有满足状态与时间条件的更新成功才算拿到任务。 */
-    public static function claim(string $workerId, int $limit = 5): array
+    /**
+     * 严格领取：FOR UPDATE SKIP LOCKED + lock_version 原子递增，返回带 fencing token 的任务。
+     * MySQL 8.0+ / MariaDB 10.6+ 均支持 SKIP LOCKED。
+     *
+     * @return list<array{id:int,lock_version:int,workflow_type:string}>
+     */
+    public static function claimStrict(string $workerId, int $limit = 5): array
     {
-        $rows = Db::fetchAll(
-            'SELECT id, workflow_type FROM ai_workflows
-             WHERE status IN (\'queued\', \'failed\') AND run_after <= NOW() AND retry_count < max_retries
-             ORDER BY id ASC LIMIT ' . max(1, min(50, $limit))
-        );
-        $claimed = [];
-        foreach ($rows as $row) {
-            $steps = Db::fetchAll(
-                'SELECT name FROM ai_workflow_steps WHERE workflow_id = ? AND status IN (\'queued\',\'failed\') ORDER BY step_no LIMIT 1',
-                [(int) $row['id']]
+        $limit = max(1, min(50, $limit));
+        return Db::transaction(static function () use ($workerId, $limit): array {
+            $rows = Db::fetchAll(
+                "SELECT id, workflow_type, lock_version FROM ai_workflows
+                 WHERE status IN ('queued', 'failed') AND run_after <= NOW()
+                   AND retry_count < max_retries
+                 ORDER BY id ASC LIMIT {$limit}
+                 FOR UPDATE SKIP LOCKED"
             );
-            $step = $steps[0]['name'] ?? 'validate_input';
-            $ok = Db::update(
-                'ai_workflows',
-                [
+            $claimed = [];
+            foreach ($rows as $row) {
+                $id = (int) $row['id'];
+                $step = Db::fetchAll(
+                    "SELECT name FROM ai_workflow_steps WHERE workflow_id = ? AND status IN ('queued','failed') ORDER BY step_no LIMIT 1",
+                    [$id]
+                );
+                $stepName = $step[0]['name'] ?? 'validate_input';
+                $updated = Db::update('ai_workflows', [
                     'status' => 'processing',
                     'locked_by' => $workerId,
                     'lease_until' => date('Y-m-d H:i:s', time() + 900),
-                    'current_step' => $step,
+                    'heartbeat_at' => date('Y-m-d H:i:s'),
+                    'current_step' => $stepName,
                     'started_at' => date('Y-m-d H:i:s'),
-                ],
-                'id = ? AND status IN (\'queued\',\'failed\') AND run_after <= NOW() AND retry_count < max_retries',
-                [(int) $row['id']]
-            );
-            if ($ok === 1) {
-                $claimed[] = (int) $row['id'];
-                Audit::log('ai.workflow.claimed', 'ai_workflow', (int) $row['id'], ['worker' => $workerId]);
+                    'lock_version' => (int) $row['lock_version'] + 1,
+                ], "id = ? AND status IN ('queued','failed') AND run_after <= NOW() AND retry_count < max_retries", [$id]);
+                if ($updated !== 1) {
+                    continue;
+                }
+                $version = (int) Db::value('SELECT lock_version FROM ai_workflows WHERE id = ?', [$id]);
+                $claimed[] = ['id' => $id, 'lock_version' => $version, 'workflow_type' => (string) $row['workflow_type']];
+                Audit::log('ai.workflow.claimed', 'ai_workflow', $id, ['worker' => $workerId, 'lock_version' => $version]);
             }
-        }
-        return $claimed;
+            return $claimed;
+        });
     }
 
-    /** Worker 异常退出后的租约恢复 + 指数退避重排队。 */
+    /** 兼容旧调用：只返回任务 ID 列表；真正 Worker 使用 claimStrict()。 */
+    public static function claim(string $workerId, int $limit = 5): array
+    {
+        return array_map(static fn (array $row): int => $row['id'], self::claimStrict($workerId, $limit));
+    }
+
+    /** 只有当前持锁 Worker（且租约未过期）可以续租。 */
+    public static function heartbeat(int $id, string $workerId, int $lockVersion): bool
+    {
+        $updated = Db::update(
+            'ai_workflows',
+            ['heartbeat_at' => date('Y-m-d H:i:s'), 'lease_until' => date('Y-m-d H:i:s', time() + 900)],
+            "id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?
+             AND (lease_until IS NULL OR lease_until > NOW())",
+            [$id, $workerId, $lockVersion]
+        );
+        // MySQL 对「值未发生实际变化」的 UPDATE 返回 rowCount=0；
+        // 同秒内续租即属此情况，再用所有权校验确认不是被其他 Worker 抢走。
+        return $updated === 1 || ($updated === 0 && self::owns($id, $workerId, $lockVersion));
+    }
+
+    /** 严格校验 Worker 所有权；失败时旧 Worker 不得写入任何结果。 */
+    public static function owns(int $id, string $workerId, int $lockVersion): bool
+    {
+        return (int) Db::value(
+            "SELECT COUNT(*) FROM ai_workflows
+             WHERE id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?",
+            [$id, $workerId, $lockVersion]
+        ) === 1;
+    }
+
+    /** 租约超时恢复：条件 UPDATE + fencing 版本递增 + 审计 + 指数退避重排。 */
     public static function recoverExpired(): array
     {
         $expired = Db::fetchAll(
-            'SELECT id FROM ai_workflows WHERE status = \'processing\' AND lease_until IS NOT NULL AND lease_until < NOW()'
+            "SELECT id, locked_by, lock_version, retry_count FROM ai_workflows
+             WHERE status = 'processing' AND lease_until IS NOT NULL AND lease_until < NOW()"
         );
+        $recovered = 0;
         foreach ($expired as $row) {
-            Db::update('ai_workflows', [
-                'status' => 'failed',
+            $id = (int) $row['id'];
+            $retry = min((int) $row['retry_count'] + 1, (int) Db::value('SELECT max_retries FROM ai_workflows WHERE id = ?', [$id]));
+            $max = (int) Db::value('SELECT max_retries FROM ai_workflows WHERE id = ?', [$id]);
+            $ok = Db::update('ai_workflows', [
+                'status' => $retry < $max ? 'queued' : 'failed',
                 'failure_class' => 'lease_expired',
                 'error_message' => 'Worker 租约超时，任务已回收',
+                'last_error_at' => date('Y-m-d H:i:s'),
                 'locked_by' => null,
                 'lease_until' => null,
-            ], 'id = ? AND status = \'processing\'', [(int) $row['id']]);
-            Audit::log('ai.workflow.lease_expired', 'ai_workflow', (int) $row['id'], []);
+                'heartbeat_at' => null,
+                'lock_version' => (int) $row['lock_version'] + 1,
+                'retry_count' => $retry,
+                'run_after' => date('Y-m-d H:i:s', time() + ($retry < $max ? min(60, 2 ** ($retry - 1)) : 0)),
+            ], "id = ? AND status = 'processing' AND lease_until IS NOT NULL AND lease_until < NOW()
+                AND locked_by = ? AND lock_version = ?", [$id, (string) $row['locked_by'], (int) $row['lock_version']]);
+            if ($ok !== 1) {
+                continue;
+            }
+            $recovered++;
+            Audit::log('ai.workflow.lease_expired', 'ai_workflow', $id, [
+                'previous_worker' => (string) $row['locked_by'],
+                'retry' => $retry,
+            ]);
         }
         $retried = 0;
         $failed = Db::fetchAll(
-            'SELECT id, retry_count FROM ai_workflows WHERE status = \'failed\' AND retry_count < max_retries AND run_after <= NOW()'
+            "SELECT id, retry_count FROM ai_workflows WHERE status = 'failed' AND retry_count < max_retries AND run_after <= NOW()"
         );
         foreach ($failed as $row) {
             $delay = min(60, 2 ** (int) $row['retry_count']);
             $ok = Db::update(
                 'ai_workflows',
                 ['status' => 'queued', 'run_after' => date('Y-m-d H:i:s', time() + $delay)],
-                'id = ? AND status = \'failed\' AND retry_count < max_retries',
+                "id = ? AND status = 'failed' AND retry_count < max_retries",
                 [(int) $row['id']]
             );
             $retried += $ok;
         }
-        return ['expired' => count($expired), 'requeued' => $retried];
+        return ['expired' => $recovered, 'requeued' => $retried];
     }
 
     /** 执行任务；online handler 走 AI Provider，未配置时用本地草稿模板，绝不编造为事实。 */
-    public static function process(int $id, string $workerId = 'inline'): array
+    public static function process(int $id, string $workerId = 'inline', ?int $lockVersion = null): array
     {
+        if ($lockVersion !== null && !self::owns($id, $workerId, $lockVersion)) {
+            throw new RuntimeException('任务持有权校验失败，拒绝写入结果');
+        }
         $workflow = self::find($id);
         if ($workflow === null) {
             throw new RuntimeException('AI 工作流不存在');
@@ -186,7 +248,10 @@ final class AiWorkflowService
         $familyId = (int) $workflow['family_id'];
         try {
             $output = self::run($type, $input);
-            Db::transaction(static function () use ($id, $output, $familyId, $workflow, $input): void {
+            Db::transaction(static function () use ($id, $output, $familyId, $workflow, $input, $workerId, $lockVersion): void {
+                if ($lockVersion !== null && !self::owns($id, $workerId, $lockVersion)) {
+                    throw new RuntimeException('任务持有权在提交前失效');
+                }
                 $steps = Db::fetchAll('SELECT id, name FROM ai_workflow_steps WHERE workflow_id = ? ORDER BY step_no', [$id]);
                 foreach ($steps as $step) {
                     Db::update('ai_workflow_steps', [
@@ -205,7 +270,10 @@ final class AiWorkflowService
                     'lease_until' => null,
                     'locked_by' => null,
                     'finished_at' => date('Y-m-d H:i:s'),
-                ], 'id = ?', [$id]);
+                ], $lockVersion !== null
+                    ? "id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?"
+                    : 'id = ?',
+                    $lockVersion !== null ? [$id, $workerId, $lockVersion] : [$id]);
                 Db::insert('ai_generation_logs', [
                     'workflow_id' => $id,
                     'family_id' => $familyId,
@@ -240,7 +308,11 @@ final class AiWorkflowService
                 'lease_until' => null,
                 'locked_by' => null,
                 'run_after' => date('Y-m-d H:i:s', time() + ($status === 'queued' ? $delay : 0)),
-            ], 'id = ?', [$id]);
+            ], $lockVersion !== null
+                ? "id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?"
+                : 'id = ?',
+                $lockVersion !== null ? [$id, $workerId, $lockVersion] : [$id]);
+            Db::update('ai_workflows', ['last_error_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
             Audit::log('ai.workflow.failed', 'ai_workflow', $id, [
                 'class' => $class, 'retry' => $retry, 'error' => mb_substr($e->getMessage(), 0, 120),
             ]);
