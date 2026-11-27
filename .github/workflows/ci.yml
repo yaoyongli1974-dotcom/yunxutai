@@ -26,7 +26,7 @@ jobs:
       DB_DATABASE: jidian_test
       APP_ENV: testing
       APP_DEBUG: "true"
-      APP_KEY: ci-only-key-not-for-production
+      APP_KEY: ci-only-key-0123456789abcdef0123456789abcdef
       AI_ENABLED: "true"
       AI_PROVIDER: demo
       WX_APPID: ci-test-appid
