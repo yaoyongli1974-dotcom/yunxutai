@@ -1,0 +1,18 @@
+<view class="page">
+  <view class="head"><text class="title">{{family.name || '家族'}}</text><text class="sub">{{family.description || '暂无简介'}}</text></view>
+  <view class="grid">
+    <view class="entry" data-url="/pages/archives/list?familyId={{familyId}}" bindtap="onNav"><text>数字档案</text><text class="arrow">›</text></view>
+    <view class="entry" bindtap="onGenealogy"><text>家族谱系</text><text class="arrow">›</text></view>
+    <view class="entry" bindtap="onWorkflow"><text>AI 工坊</text><text class="arrow">›</text></view>
+  </view>
+  <view class="section-title">家族人物（{{persons.length}}）</view>
+  <view class="empty" wx:if="{{!persons.length}}">还没有人物档案。</view>
+  <view class="card" wx:for="{{persons}}" wx:key="id">
+    <text class="card-title">{{item.name}}</text>
+    <text class="card-meta">{{item.birth_date || '?'} — {{item.death_date || '?'}}</text>
+  </view>
+  <view class="section-title">家族事件（{{events.length}}）</view>
+  <view class="card" wx:for="{{events}}" wx:key="id">
+    <text class="card-title">{{item.title}}</text><text class="card-meta">{{item.event_date || ''}}</text>
+  </view>
+</view>

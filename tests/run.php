@@ -2766,6 +2766,136 @@ test('阶段 F：通知中心、偏好与失败旁路', function (): void {
     check((string) Db::value("SELECT status FROM notifications WHERE type = 'export_ready' AND channel = 'email' ORDER BY id DESC LIMIT 1") === 'failed', '邮件失败状态未记录');
     \App\Core\Notify::reset();
 });
+echo "\n[阶段 G：API v1 与小程序联调]\n";
+
+test('阶段 G：API 家族/人物/谱系/档案/AI 全链路', function (): void {
+    $owner = make_family_user('g-api');
+    $token = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $owner['email'], 'password' => 'FamilyTest@123',
+    ]));
+    check($token !== '', 'API token 签发失败');
+
+    $created = api('POST', '/api/v1/families', [
+        'name' => 'API 测试家族', 'slug' => 'g-api-' . bin2hex(random_bytes(3)),
+        'privacy' => 'public', 'description' => '阶段 G 联调',
+    ], $token);
+    check($created['status'] === 201, 'API 创建家族失败：' . $created['raw']);
+    $familyId = (int) ($created['data']['data']['id'] ?? 0);
+    check($familyId > 0, 'API 未返回家族 ID');
+
+    $list = api('GET', '/api/v1/families', null, $token);
+    check($list['status'] === 200, 'API 家族列表失败：' . $list['raw']);
+    check(count(array_filter($list['data']['data']['items'] ?? [], fn ($f) => (int) ($f['id'] ?? 0) === $familyId)) === 1, 'API 家族列表缺少新家族');
+
+    $person = api('POST', '/api/v1/families/' . $familyId . '/persons', [
+        'name' => 'API 祖辈', 'gender' => 'female', 'birth_date' => '1930-01-02',
+        'death_date' => '2001-03-04', 'privacy' => 'private',
+    ], $token);
+    check($person['status'] === 201, 'API 创建人物失败：' . $person['raw']);
+    $personId = (int) ($person['data']['data']['id'] ?? 0);
+    $personB = api('POST', '/api/v1/families/' . $familyId . '/persons', [
+        'name' => 'API 后辈', 'gender' => 'male', 'birth_date' => '1960-05-06',
+        'death_date' => '2020-07-08', 'privacy' => 'private',
+    ], $token);
+    $personBId = (int) ($personB['data']['data']['id'] ?? 0);
+
+    $relation = api('POST', '/api/v1/families/' . $familyId . '/relationships', [
+        'person_a' => $personId, 'person_b' => $personBId, 'relationship_type' => 'parent',
+    ], $token);
+    check($relation['status'] === 201 && ($relation['data']['data']['status'] ?? '') === 'pending', '关系应进入待审核：' . $relation['raw']);
+    $relationId = (int) ($relation['data']['data']['id'] ?? 0);
+    $tree = api('GET', '/api/v1/families/' . $familyId . '/genealogy?center_id=' . $personId, null, $token);
+    check($tree['status'] === 200, 'API 谱系失败：' . $tree['raw']);
+
+    $review = api('POST', '/api/v1/families/' . $familyId . '/relationships/' . $relationId . '/review', [
+        'status' => 'confirmed',
+    ], $token);
+    check($review['status'] === 200, 'API 关系审核失败：' . $review['raw']);
+
+    $archive = api('POST', '/api/v1/families/' . $familyId . '/archives', [
+        'title' => 'API 档案', 'archive_type' => 'document', 'privacy' => 'public',
+    ], $token);
+    check($archive['status'] === 201, 'API 创建档案失败：' . $archive['raw']);
+    $archiveId = (int) ($archive['data']['data']['id'] ?? 0);
+    $detail = api('GET', '/api/v1/archives/' . $archiveId, null, $token);
+    check($detail['status'] === 200, 'API 档案详情失败：' . $detail['raw']);
+
+    $workflow = api('POST', '/api/v1/families/' . $familyId . '/ai/workflows', [
+        'type' => 'extract_facts', 'idempotency_key' => 'g-api-' . $familyId,
+        'text' => '祖父于一九五六年迁居南方。',
+    ], $token);
+    check($workflow['status'] === 201, 'API 创建 AI 任务失败：' . $workflow['raw']);
+    $workflowId = (int) ($workflow['data']['data']['id'] ?? 0);
+    $repeat = api('POST', '/api/v1/families/' . $familyId . '/ai/workflows', [
+        'type' => 'extract_facts', 'idempotency_key' => 'g-api-' . $familyId,
+        'text' => '祖父于一九五六年迁居南方。',
+    ], $token);
+    check((int) ($repeat['data']['data']['id'] ?? 0) === $workflowId, 'API 幂等键未生效');
+    $status = api('GET', '/api/v1/ai/workflows/' . $workflowId, null, $token);
+    check($status['status'] === 200, 'API 任务状态失败：' . $status['raw']);
+});
+
+test('阶段 G：API 跨家族越权与未授权访问被拒绝', function (): void {
+    $owner = make_family_user('g-iso-a');
+    $other = make_family_user('g-iso-b');
+    $familyId = \App\Services\FamilyService::create($owner, '隔离 A', 'g-iso-a-' . bin2hex(random_bytes(3)), ['privacy' => 'private']);
+    $personId = \App\Services\FamilyPersonService::create($owner, $familyId, [
+        'name' => '隔离人物', 'privacy' => 'private', 'death_date' => '1990-01-01',
+    ]);
+    $token = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $other['email'], 'password' => 'FamilyTest@123',
+    ]));
+
+    foreach ([
+        '/api/v1/families/' . $familyId,
+        '/api/v1/persons/' . $personId,
+        '/api/v1/families/' . $familyId . '/persons',
+    ] as $path) {
+        $res = api('GET', $path, null, $token);
+        check($res['status'] === 404, '越权路径应返回 404：' . $path . ' got ' . $res['status']);
+    }
+    $anonymous = api('GET', '/api/v1/families');
+    check($anonymous['status'] === 401, '未带 token 应返回 401，实际 ' . $anonymous['status']);
+});
+
+test('阶段 G：通知中心 API 已读与批量已读', function (): void {
+    $user = make_family_user('g-notify');
+    $id = \App\Services\NotificationService::emit(null, (int) $user['id'], 'family_invitation', 'API 通知', '内容');
+    $token = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $user['email'], 'password' => 'FamilyTest@123',
+    ]));
+    $list = api('GET', '/api/v1/notifications', null, $token);
+    check($list['status'] === 200 && (int) ($list['data']['data']['unread_count'] ?? 0) >= 1, '通知列表失败：' . $list['raw']);
+    $read = api('POST', '/api/v1/notifications/' . $id . '/read', [], $token);
+    check($read['status'] === 200, '单条已读失败：' . $read['raw']);
+    check(Db::value('SELECT read_at FROM notifications WHERE id = ?', [$id]) !== null, '已读状态未保存');
+    $all = api('POST', '/api/v1/notifications/read-all', [], $token);
+    check($all['status'] === 200, '批量已读失败：' . $all['raw']);
+});
+
+test('阶段 G：API 令牌失效与伪造身份防护', function (): void {
+    $user = make_family_user('g-token');
+    $res = api('POST', '/api/v1/auth/token', ['email' => (string) $user['email'], 'password' => 'FamilyTest@123']);
+    $token = api_token_of($res);
+    check(api('GET', '/api/v1/families', null, $token)['status'] === 200, '有效 token 应可访问');
+    check(api('GET', '/api/v1/families', null, 'bad-' . $token)['status'] === 401, '无效 token 应返回 401');
+    Db::query('UPDATE api_tokens SET revoked_at = NOW() WHERE token_hash = ?', [hash('sha256', $token)]);
+    check(api('GET', '/api/v1/families', null, $token)['status'] === 401, '已撤销 token 应返回 401');
+
+    // 客户端传入 user_id 不得改变创建者归属。
+    $other = make_family_user('g-forged');
+    $token2 = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $user['email'], 'password' => 'FamilyTest@123',
+    ]));
+    $created = api('POST', '/api/v1/families', [
+        'name' => '身份防护', 'slug' => 'g-forged-' . bin2hex(random_bytes(3)),
+        'user_id' => (int) $other['id'], 'owner_user_id' => (int) $other['id'],
+    ], $token2);
+    check($created['status'] === 201, '创建家族失败：' . $created['raw']);
+    $familyId = (int) ($created['data']['data']['id'] ?? 0);
+    check((int) Db::value('SELECT owner_user_id FROM families WHERE id = ?', [$familyId]) === (int) $user['id'], 'API 接受了伪造的 user_id');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

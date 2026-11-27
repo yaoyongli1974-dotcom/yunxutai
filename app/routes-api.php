@@ -4,6 +4,7 @@ declare(strict_types=1);
 use App\Api\Api;
 use App\Api\Controllers\AuthController;
 use App\Api\Controllers\ClaimController;
+use App\Api\Controllers\FamilyV2Controller;
 use App\Api\Controllers\ManageController;
 use App\Api\Controllers\MediaController;
 use App\Api\Controllers\MemberController;
@@ -53,4 +54,36 @@ return static function (Router $router): void {
     $router->post('/api/v1/manage/memorials/{id}/members/{memberId}/role', Api::route([MemberController::class, 'updateRole']), ['api-auth']);
     $router->post('/api/v1/manage/memorials/{id}/members/{memberId}/remove', Api::route([MemberController::class, 'remove']), ['api-auth']);
     $router->post('/api/v1/manage/memorials/{id}/invitations/{invitationId}/revoke', Api::route([MemberController::class, 'revokeInvitation']), ['api-auth']);
+
+    // 2.0 家族业务：与 Web 端共用 Service + Policy，全部要求 Bearer token。
+
+    $router->get('/api/v1/families', Api::route([FamilyV2Controller::class, 'families']), ['api-auth']);
+    $router->post('/api/v1/families', Api::route([FamilyV2Controller::class, 'createFamily']), ['api-auth']);
+    $router->post('/api/v1/invitations/accept', Api::route([FamilyV2Controller::class, 'acceptInvitation']), ['api-auth']);
+    $router->get('/api/v1/persons/{id}', Api::route([FamilyV2Controller::class, 'person']), ['api-auth']);
+    $router->get('/api/v1/archives/{id}', Api::route([FamilyV2Controller::class, 'archive']), ['api-auth']);
+    $router->get('/api/v1/ai/workflows/{id}', Api::route([FamilyV2Controller::class, 'workflow']), ['api-auth']);
+    $router->post('/api/v1/ai/workflows/{id}/cancel', Api::route([FamilyV2Controller::class, 'cancelWorkflow']), ['api-auth']);
+    $router->post('/api/v1/ai/facts/{id}/review', Api::route([FamilyV2Controller::class, 'reviewFact']), ['api-auth']);
+    $router->get('/api/v1/notifications', Api::route([FamilyV2Controller::class, 'notifications']), ['api-auth']);
+    $router->post('/api/v1/notifications/read-all', Api::route([FamilyV2Controller::class, 'readAllNotifications']), ['api-auth']);
+    $router->post('/api/v1/notifications/{id}/read', Api::route([FamilyV2Controller::class, 'readNotification']), ['api-auth']);
+
+    $router->get('/api/v1/families/{id}', Api::route([FamilyV2Controller::class, 'family']), ['api-auth']);
+    $router->get('/api/v1/families/{id}/members', Api::route([FamilyV2Controller::class, 'members']), ['api-auth']);
+    $router->post('/api/v1/families/{id}/invitations', Api::route([FamilyV2Controller::class, 'invite']), ['api-auth']);
+    $router->get('/api/v1/families/{id}/persons', Api::route([FamilyV2Controller::class, 'persons']), ['api-auth']);
+    $router->post('/api/v1/families/{id}/persons', Api::route([FamilyV2Controller::class, 'createPerson']), ['api-auth']);
+    $router->get('/api/v1/families/{id}/genealogy', Api::route([FamilyV2Controller::class, 'genealogy']), ['api-auth']);
+    $router->post('/api/v1/families/{id}/relationships', Api::route([FamilyV2Controller::class, 'submitRelationship']), ['api-auth']);
+    $router->post('/api/v1/families/{id}/relationships/{relationId}/review', Api::route([FamilyV2Controller::class, 'reviewRelationship']), ['api-auth']);
+    $router->get('/api/v1/families/{id}/archives', Api::route([FamilyV2Controller::class, 'archives']), ['api-auth']);
+    $router->post('/api/v1/families/{id}/archives', Api::route([FamilyV2Controller::class, 'createArchive']), ['api-auth']);
+    $router->post('/api/v1/families/{id}/ai/workflows', Api::route([FamilyV2Controller::class, 'createWorkflow']), ['api-auth']);
+    $router->get('/api/v1/families/{id}/ai/sessions', Api::route([FamilyV2Controller::class, 'oralSessions']), ['api-auth']);
+    $router->get('/api/v1/families/{id}/events', Api::route([FamilyV2Controller::class, 'events']), ['api-auth']);
+    $router->post('/api/v1/families/{id}/events', Api::route([FamilyV2Controller::class, 'createEvent']), ['api-auth']);
+    $router->get('/api/v1/families/{id}/exhibitions', Api::route([FamilyV2Controller::class, 'exhibitions']), ['api-auth']);
+    $router->post('/api/v1/families/{id}/exhibitions', Api::route([FamilyV2Controller::class, 'createExhibition']), ['api-auth']);
+    $router->post('/api/v1/exhibitions/{id}/publish', Api::route([FamilyV2Controller::class, 'publishExhibition']), ['api-auth']);
 };

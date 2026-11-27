@@ -1,0 +1,18 @@
+<view class="page">
+  <view class="head"><text class="title">我的家族</text><text class="sub">记取来时路，安放未尽言</text></view>
+  <view class="bar" bindtap="toggleForm">＋ 新建家族</view>
+  <view class="form" wx:if="{{showForm}}">
+    <input class="field" placeholder="家族名称" value="{{name}}" bindinput="onName" />
+    <input class="field" placeholder="标识（小写字母/数字/连字符）" value="{{slug}}" bindinput="onSlug" />
+    <picker mode="selector" range="{{privacies}}" value="{{privacyIndex}}" bindchange="onPrivacy">
+      <view class="field picker">隐私：{{privacies[privacyIndex]}}</view>
+    </picker>
+    <button class="primary" bindtap="onCreate">创建</button>
+  </view>
+  <view class="empty" wx:if="{{!loading && !families.length}}">还没有家族，先创建一个吧。</view>
+  <view class="card" wx:for="{{families}}" wx:key="id" data-id="{{item.id}}" bindtap="onOpen">
+    <text class="card-title">{{item.name}}</text>
+    <text class="card-meta">{{item.description || '暂无简介'}}</text>
+    <text class="card-tag">{{item.privacy}}</text>
+  </view>
+</view>

@@ -7,7 +7,11 @@
     "pages/manage/create",
     "pages/manage/members",
     "pages/report/report",
-    "pages/account/account"
+    "pages/account/account",
+    "pages/families/list",
+    "pages/families/detail",
+    "pages/archives/list",
+    "pages/notifications/list"
   ],
   "window": {
     "navigationBarTitleText": "云叙台",

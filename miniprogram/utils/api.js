@@ -190,6 +190,32 @@ function revokeInvitation(memorialId, invitationId) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* 云叙台 2.0：家族 / 谱系 / 档案 / AI / 通知                              */
+/* ------------------------------------------------------------------ */
+
+function listFamilies() { return request.get(BASE + '/families'); }
+function createFamily(payload) { return request.post(BASE + '/families', payload); }
+function getFamily(id) { return request.get(BASE + '/families/' + idPath(id)); }
+function listMembers(id) { return request.get(BASE + '/families/' + idPath(id) + '/members'); }
+function inviteFamilyMember(id, payload) { return request.post(BASE + '/families/' + idPath(id) + '/invitations', payload); }
+function acceptInvitation(token) { return request.post(BASE + '/invitations/accept', { token: token }); }
+function listPersons(id) { return request.get(BASE + '/families/' + idPath(id) + '/persons'); }
+function createPerson(id, payload) { return request.post(BASE + '/families/' + idPath(id) + '/persons', payload); }
+function getPerson(id) { return request.get(BASE + '/persons/' + idPath(id)); }
+function getGenealogy(id, centerId) { return request.get(BASE + '/families/' + idPath(id) + '/genealogy' + query({ center_id: centerId })); }
+function listArchives(id, keyword) { return request.get(BASE + '/families/' + idPath(id) + '/archives' + query({ q: keyword })); }
+function getArchive(id) { return request.get(BASE + '/archives/' + idPath(id)); }
+function createArchive(id, payload) { return request.post(BASE + '/families/' + idPath(id) + '/archives', payload); }
+function createWorkflow(id, payload) { return request.post(BASE + '/families/' + idPath(id) + '/ai/workflows', payload); }
+function getWorkflow(id) { return request.get(BASE + '/ai/workflows/' + idPath(id)); }
+function cancelWorkflow(id) { return request.post(BASE + '/ai/workflows/' + idPath(id) + '/cancel'); }
+function listEvents(id) { return request.get(BASE + '/families/' + idPath(id) + '/events'); }
+function listExhibitions(id) { return request.get(BASE + '/families/' + idPath(id) + '/exhibitions'); }
+function listNotifications() { return request.get(BASE + '/notifications'); }
+function readNotification(id) { return request.post(BASE + '/notifications/' + idPath(id) + '/read'); }
+function readAllNotifications() { return request.post(BASE + '/notifications/read-all'); }
+
 module.exports = {
   // auth
   login: login,
@@ -214,4 +240,26 @@ module.exports = {
   updateMemberRole: updateMemberRole,
   removeMember: removeMember,
   revokeInvitation: revokeInvitation,
+  // family 2.0
+  listFamilies: listFamilies,
+  createFamily: createFamily,
+  getFamily: getFamily,
+  listFamilyMembers: listMembers,
+  inviteFamilyMember: inviteFamilyMember,
+  acceptInvitation: acceptInvitation,
+  listPersons: listPersons,
+  createPerson: createPerson,
+  getPerson: getPerson,
+  getGenealogy: getGenealogy,
+  listArchives: listArchives,
+  getArchive: getArchive,
+  createArchive: createArchive,
+  createWorkflow: createWorkflow,
+  getWorkflow: getWorkflow,
+  cancelWorkflow: cancelWorkflow,
+  listEvents: listEvents,
+  listExhibitions: listExhibitions,
+  listNotifications: listNotifications,
+  readNotification: readNotification,
+  readAllNotifications: readAllNotifications,
 };

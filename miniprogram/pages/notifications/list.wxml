@@ -1,0 +1,10 @@
+<view class="page">
+  <view class="head"><text class="title">通知中心</text><text class="sub">未读 {{unreadCount}}</text></view>
+  <view class="bar" bindtap="onReadAll">全部标为已读</view>
+  <view class="empty" wx:if="{{!loading && !items.length}}">暂无通知。</view>
+  <view class="card {{item.read_at ? '' : 'unread'}}" wx:for="{{items}}" wx:key="id" data-id="{{item.id}}" bindtap="onRead">
+    <text class="card-title">{{item.title}}</text>
+    <text class="card-meta">{{item.created_at}}</text>
+    <text class="card-body">{{item.body || ''}}</text>
+  </view>
+</view>
