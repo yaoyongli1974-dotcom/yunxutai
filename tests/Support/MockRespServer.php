@@ -179,8 +179,32 @@ final class MockRespServer
             'SETEX' => $this->setex($args),
             'DEL' => $this->del($args),
             'TTL' => $this->ttl((string) ($args[1] ?? '')),
+            'EVAL' => $this->evalConsume($args),
             default => "-ERR unknown command '{$command}'\r\n",
         };
+    }
+
+    /** 仅模拟本项目 Lua 限流脚本：GET -> 判断 -> SET EX / INCR，超限不计数。 */
+    private function evalConsume(array $args): string
+    {
+        $script = (string) ($args[1] ?? '');
+        if (!str_contains($script, 'current >= limit')) {
+            return "-ERR unsupported Lua script\r\n";
+        }
+        $key = (string) ($args[3] ?? '');
+        $limit = (int) ($args[4] ?? 0);
+        $ttl = (int) ($args[5] ?? 0);
+        $this->expireIfNeeded($key);
+        $current = isset($this->data[$key]) ? (int) $this->data[$key] : 0;
+        if ($current >= $limit) {
+            return ':' . ($current + 1) . "\r\n";
+        }
+        if ($current === 0) {
+            $this->data[$key] = '1';
+            $this->expires[$key] = time() + $ttl;
+            return ":1\r\n";
+        }
+        return $this->incr($key);
     }
 
     private function incr(string $key): string

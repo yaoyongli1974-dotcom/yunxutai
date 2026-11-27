@@ -68,7 +68,7 @@ final class ReportController extends BaseController
             throw ApiException::validation('举报信息不完整', $fields);
         }
 
-        if (!RateLimiter::hit('report:' . $request->ip(), 5, 3600)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('report', $request->ip()), 5, 3600)) {
             throw ApiException::rateLimited('提交过于频繁，请稍后再试');
         }
 

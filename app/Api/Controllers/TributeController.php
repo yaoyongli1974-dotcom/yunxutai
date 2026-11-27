@@ -32,7 +32,7 @@ final class TributeController extends BaseController
     {
         [$memorial, $user] = $this->loadPostable($slug);
 
-        if (!RateLimiter::hit('tribute:' . $user['id'] . ':' . $memorial['id'], 12, 600)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('tribute', (string) $user['id'], (string) $memorial['id']), 12, 600)) {
             throw ApiException::rateLimited('祭奠操作过于频繁，请稍后再来');
         }
 
@@ -128,7 +128,7 @@ final class TributeController extends BaseController
             throw ApiException::forbidden('该纪念馆暂未开放留言');
         }
 
-        if (!RateLimiter::hit('message:' . $user['id'] . ':' . $memorial['id'], 6, 600)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('message', (string) $user['id'], (string) $memorial['id']), 6, 600)) {
             throw ApiException::rateLimited('留言过于频繁，请稍后再试');
         }
 

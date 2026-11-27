@@ -116,6 +116,9 @@ final class FamilyV2Controller extends BaseController
 
     public function acceptInvitation(Request $request): Response
     {
+        if (!\App\Core\RateLimiter::hit(\App\Core\RateLimitKeys::make('invitation_accept', (string) $this->user()['id']), 10, 300)) {
+            throw ApiException::rateLimited('邀请接受尝试过于频繁');
+        }
         $token = Input::string($request, 'token');
         if ($token === '') {
             throw ApiException::validation('邀请令牌不能为空');
@@ -247,6 +250,9 @@ final class FamilyV2Controller extends BaseController
 
     public function createWorkflow(Request $request, string $id): Response
     {
+        if (!\App\Core\RateLimiter::hit(\App\Core\RateLimitKeys::make('ai_workflow_create', (string) $this->user()['id'], $id), 20, 3600)) {
+            throw ApiException::rateLimited('AI 任务创建过于频繁，请稍后再试');
+        }
         $input = Input::all($request);
         unset($input['type'], $input['idempotency_key']);
         $id = $this->call(fn () => AiWorkflowService::create(

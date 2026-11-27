@@ -113,6 +113,7 @@ final class ApiAuth
         }
 
         $token = trim($matches[1]);
-        return $token === '' ? null : $token;
+        // 本系统签发的 token 固定为 64 位十六进制；先做格式校验再查库。
+        return preg_match('/^[a-f0-9]{64}$/i', $token) === 1 ? $token : null;
     }
 }

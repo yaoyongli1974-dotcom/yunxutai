@@ -1614,7 +1614,11 @@ test('2FA 登录闸门、限流与停用流程', function () use ($cleanupTotp):
 
     $host = (string) (parse_url($baseUrl, PHP_URL_HOST) ?: '127.0.0.1');
     // 测试请求从本机发出，兼容 IPv4/IPv6 与自定义 BASE_URL 主机名。
-    $limitKeys = array_unique(['2fa:' . $host . ':' . $adminId, '2fa:127.0.0.1:' . $adminId, '2fa:::1:' . $adminId]);
+    // 新限流键由 RateLimitKeys 统一生成（身份与 IP 均哈希），清理必须用同一构造逻辑。
+    $limitKeys = [];
+    foreach (array_unique([$host, '127.0.0.1', '::1']) as $ip) {
+        $limitKeys[] = \App\Core\RateLimitKeys::make('2fa', (string) $adminId, $ip);
+    }
     foreach ($limitKeys as $limitKey) {
         RateLimiter::clear($limitKey);
     }
@@ -2976,6 +2980,73 @@ test('补齐：机构租户预留仅平台管理员可管理且家族隔离', fu
         check($e->getStatusCode() === 403, '越权机构操作应 403');
     }
     check(db_count('schema_migrations', "version IN ('20261127_025','20261127_026') AND status = 'applied'") === 2, '新增迁移未执行');
+});
+
+echo "\n[Round2 Phase 1：API Token 边界与 CSRF]\n";
+
+test('Round2 A-02：Web Session 不能替代 Bearer Token 访问 API', function (): void {
+    login('demo@example.com', 'Demo@123456');
+    check(http('GET', '/dashboard')['status'] === 200, 'Web 会话应能访问网页');
+    check(api('GET', '/api/v1/me')['status'] === 401, 'Web Session 不能访问 API 私有读接口');
+    $write = api('POST', '/api/v1/reports', ['target_type' => 'memorial', 'reason' => '测试']);
+    check($write['status'] === 401, 'Web Session 不能访问 API 写接口，实际 ' . $write['status']);
+    check(($write['data']['error']['code'] ?? '') === 'unauthorized', 'API 401 必须是统一 JSON');
+    reset_session();
+});
+
+test('Round2 A-02：无效/撤销/过期 Token 均 401，有效 Token 正常', function (): void {
+    $user = make_family_user('r2-token');
+    $res = api('POST', '/api/v1/auth/token', ['email' => (string) $user['email'], 'password' => 'FamilyTest@123']);
+    $token = api_token_of($res);
+    check(api('GET', '/api/v1/me', null, $token)['status'] === 200, '有效 Token 应可访问');
+    check(api('GET', '/api/v1/me', null, str_repeat('a', 64))['status'] === 401, '格式正确但不存在的 Token 应 401');
+    check(api('GET', '/api/v1/me', null, 'short')['status'] === 401, '格式错误的 Token 应 401');
+    Db::query('UPDATE api_tokens SET revoked_at = NOW() WHERE token_hash = ?', [hash('sha256', $token)]);
+    check(api('GET', '/api/v1/me', null, $token)['status'] === 401, '已撤销 Token 应 401');
+   Db::query('UPDATE api_tokens SET revoked_at = NULL, expires_at = ? WHERE token_hash = ?', [
+        date('Y-m-d H:i:s', time() - 60), hash('sha256', $token),
+    ]);
+    check(api('GET', '/api/v1/me', null, $token)['status'] === 401, '过期 Token 应 401');
+});
+
+test('Round2 A-02：Web 写操作仍需 CSRF Token', function (): void {
+    login('demo@example.com', 'Demo@123456');
+    $without = http('POST', '/families', [
+        'name' => 'Round2 CSRF', 'slug' => 'r2-csrf-' . bin2hex(random_bytes(3)),
+    ], [], false);
+    check(in_array($without['status'], [400, 403, 419], true), '缺少 CSRF 的 Web 写请求应被拒绝，实际 ' . $without['status']);
+    check(db_count('families', "slug LIKE 'r2-csrf-%'") === 0, '缺少 CSRF 的写请求不应落库');
+    $with = http('POST', '/families', [
+        '_token' => csrf_token('/families/new'), 'name' => 'Round2 CSRF',
+        'slug' => 'r2-csrf-' . bin2hex(random_bytes(3)),
+    ], [], false);
+    check($with['status'] === 302, '带 CSRF 的 Web 写请求应成功，实际 ' . $with['status']);
+});
+
+test('Round2 B：100 并发最多放行 10 次且不产生重复限流行', function (): void {
+    $key = \App\Core\RateLimitKeys::make('r2_concurrency', 'burst-' . bin2hex(random_bytes(6)));
+    $dir = sys_get_temp_dir() . '/r2-rate-' . bin2hex(random_bytes(4));
+    mkdir($dir, 0700);
+    $helper = escapeshellarg(__DIR__ . '/concurrency/rate.php');
+    $cmd = 'seq 1 100 | xargs -P 25 -I{} sh -c \'php ' . $helper . ' ' . escapeshellarg($key)
+        . ' > ' . escapeshellarg($dir) . '/{}\'';
+    shell_exec($cmd . ' 2>/dev/null');
+    $allowed = 0;
+    $denied = 0;
+    foreach (glob($dir . '/*') ?: [] as $file) {
+        $value = trim((string) file_get_contents($file));
+        if ($value === '1') {
+            $allowed++;
+        } elseif ($value === '0') {
+            $denied++;
+        }
+        @unlink($file);
+    }
+    @rmdir($dir);
+    check($allowed + $denied === 100, '并发子进程未全部完成');
+    check($allowed <= 10, '100 并发最多放行 10 次，实际 ' . $allowed);
+    check($allowed >= 1, '至少应放行一次');
+    \App\Core\RateLimiter::clear($key);
 });
 
 echo "\n========== 结果 ==========\n";

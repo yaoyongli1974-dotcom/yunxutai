@@ -136,6 +136,10 @@ final class ArchiveController
     {
         Csrf::verify($request);
         $archive = $this->archive((int) $id);
+        if (!\App\Core\RateLimiter::hit(\App\Core\RateLimitKeys::make('upload', (string) (Auth::user()['id'] ?? ''), (string) $archive['family_id']), 30, 3600)) {
+            Flash::error('上传次数过多，请稍后再试。');
+            return Response::redirect('/archives/' . (int) $archive['id']);
+        }
         $file = $request->file('file');
         try {
             if ($file === null) {

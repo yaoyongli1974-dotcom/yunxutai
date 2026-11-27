@@ -93,11 +93,11 @@ final class Router
                 : (Auth::check()
                     ? throw new HttpException(403, '没有访问权限')
                     : Response::redirect('/login?next=' . rawurlencode($request->path))),
-            // API 认证：先解析 Bearer token；无 token 时保留会话回退能力。失败只返回 JSON，不跳转 HTML。
-            'api-auth' => (ApiAuth::resolve() !== null || Auth::check())
+            // API 认证只接受 Bearer Token，绝不使用 Web Session 回退；失败统一 JSON，不跳转 HTML。
+            'api-auth' => ApiAuth::resolve() !== null
                 ? null
                 : Response::json(['error' => ['code' => 'unauthorized', 'message' => '请先登录']], 401),
-            'api-admin' => (ApiAuth::resolve() !== null || Auth::check())
+            'api-admin' => ApiAuth::resolve() !== null
                 ? (Auth::isAdmin()
                     ? null
                     : Response::json(['error' => ['code' => 'forbidden', 'message' => '没有访问权限']], 403))

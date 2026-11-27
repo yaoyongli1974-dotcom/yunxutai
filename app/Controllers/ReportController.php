@@ -73,7 +73,7 @@ final class ReportController
         if (mb_strlen($data['contact']) > 190) {
             $errors['contact'] = '联系方式过长';
         }
-        if (!RateLimiter::hit('report:' . $request->ip(), 5, 3600)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('report', $request->ip()), 5, 3600)) {
             $errors['form'] = '提交过于频繁，请稍后再试';
         }
         if (!Captcha::verify($request->input('captcha'))) {

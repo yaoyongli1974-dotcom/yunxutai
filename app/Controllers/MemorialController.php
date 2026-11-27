@@ -216,7 +216,7 @@ final class MemorialController
         if (Claim::pendingForUser((int) $memorial['id'], (int) $user['id'])) {
             $errors['form'] = '你已有一条待处理的申请，请耐心等待审核';
         }
-        if (!RateLimiter::hit('claim:' . $user['id'], 3, 86400)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('claim', (string) $user['id']), 3, 86400)) {
             $errors['form'] = '提交过于频繁，请明天再试';
         }
 

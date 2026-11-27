@@ -29,7 +29,7 @@ final class AuthController
     {
         Csrf::verify($request);
 
-        if (!RateLimiter::hit('register:' . $request->ip(), 5, 3600)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('register', $request->ip()), 5, 3600)) {
             return View::render('auth/register', [
                 'title' => '创建账号',
                 'errors' => ['form' => '操作过于频繁，请稍后再试'],
@@ -69,7 +69,9 @@ final class AuthController
         if (!$request->bool('terms')) {
             $errors['terms'] = '请阅读并同意服务条款与隐私说明';
         }
-        if (!Captcha::verify($request->input('captcha'))) {
+        if (!\App\Core\RateLimiter::hit(\App\Core\RateLimitKeys::make('captcha', $request->ip()), 10, 300)) {
+            $errors['captcha'] = '验证码尝试次数过多，请稍后再试';
+        } elseif (!Captcha::verify($request->input('captcha'))) {
             $errors['captcha'] = '验证码不正确或已过期';
         }
 
@@ -108,7 +110,7 @@ final class AuthController
         $password = (string) $request->raw('password', '');
         $next = $this->safeNext((string) $request->input('next', ''));
 
-        if (RateLimiter::blocked('login-ip:' . $request->ip(), 30)) {
+        if (RateLimiter::blocked(\App\Core\RateLimitKeys::make('login_ip', $request->ip()), 30)) {
             return View::render('auth/login', [
                 'title' => '登录',
                 'errors' => ['form' => '尝试次数过多，请稍后再试'],
@@ -116,8 +118,8 @@ final class AuthController
                 'next' => $next,
             ], 'layout', 429);
         }
-        if (!RateLimiter::hit('login:' . $request->ip() . ':' . $email, (int) config('security.login_max_attempts'), (int) config('security.login_window'))) {
-            RateLimiter::hit('login-ip:' . $request->ip(), 30, 3600);
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('login', $email, $request->ip()), (int) config('security.login_max_attempts'), (int) config('security.login_window'))) {
+            RateLimiter::hit(\App\Core\RateLimitKeys::make('login_ip', $request->ip()), 30, 3600);
             return View::render('auth/login', [
                 'title' => '登录',
                 'errors' => ['form' => '尝试次数过多，请 15 分钟后再试'],
@@ -138,7 +140,7 @@ final class AuthController
             if ($user === null) {
                 $errors['form'] = '邮箱或密码不正确';
             } else {
-                RateLimiter::clear('login:' . $request->ip() . ':' . $email);
+                RateLimiter::clear(\App\Core\RateLimitKeys::make('login', $email, $request->ip()));
                 if ((int) ($user['totp_enabled'] ?? 0) === 1) {
                     // 密码通过但二次验证未完成：此时不建立登录态，只保存短时待验证上下文。
                     session_regenerate_id(true);
@@ -201,7 +203,7 @@ final class AuthController
             return Response::redirect('/login');
         }
 
-        $key = '2fa:' . $request->ip() . ':' . (int) $user['id'];
+        $key = \App\Core\RateLimitKeys::make('2fa', (string) $user['id'], $request->ip());
         if (!RateLimiter::hit($key, (int) config('security.login_max_attempts'), (int) config('security.login_window'))) {
             return View::render('auth/twofactor', [
                 'title' => '二次验证',

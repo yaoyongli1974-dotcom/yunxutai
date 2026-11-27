@@ -23,7 +23,7 @@ final class AuthController extends BaseController
      */
     public function token(Request $request): Response
     {
-        if (!RateLimiter::hit('api-token:' . $request->ip(), 5, 300)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('token', $request->ip()), 5, 300)) {
             throw ApiException::rateLimited('尝试次数过多，请 5 分钟后再试');
         }
 
@@ -55,7 +55,7 @@ final class AuthController extends BaseController
         }
 
         $token = ApiAuth::createToken($user, 'miniapp');
-        RateLimiter::clear('api-token:' . $request->ip());
+        RateLimiter::clear(\App\Core\RateLimitKeys::make('token', $request->ip()));
 
         return Api::ok([
             'token' => (string) $token['token'],
@@ -70,6 +70,9 @@ final class AuthController extends BaseController
      */
     public function wechat(Request $request): Response
     {
+        if (!\App\Core\RateLimiter::hit(\App\Core\RateLimitKeys::make('wechat_login', $request->ip()), 10, 300)) {
+            throw ApiException::rateLimited('微信登录尝试过于频繁，请稍后再试');
+        }
         $code = Input::string($request, 'code');
         if ($code === '') {
             throw ApiException::validation('缺少 code', ['code' => 'code 不能为空']);

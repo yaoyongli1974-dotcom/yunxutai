@@ -17,6 +17,12 @@ interface CounterStore
     public function increment(string $key, int $windowSeconds): int;
 
     /**
+     * 原子判断并计数：窗口内前 max 次返回 true，超限返回 false 且不增加计数。
+     * 窗口过期时重置计数与过期时间； implementations 必须在单次存储操作中完成。
+     */
+    public function consume(string $key, int $max, int $windowSeconds): bool;
+
+    /**
      * 读取当前窗口计数；未命中或已过期返回 0。
      */
     public function count(string $key): int;

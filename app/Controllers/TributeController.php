@@ -26,7 +26,7 @@ final class TributeController
         $memorial = $this->loadActionable($slug);
         $user = Auth::user();
 
-        if (!RateLimiter::hit('tribute:' . $user['id'] . ':' . $memorial['id'], 12, 600)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('tribute', (string) $user['id'], (string) $memorial['id']), 12, 600)) {
             Flash::error('祭奠操作过于频繁，请稍后再来。');
             return Response::redirect('/m/' . $memorial['slug'] . '#tributes');
         }
@@ -74,7 +74,7 @@ final class TributeController
             return Response::redirect('/m/' . $memorial['slug']);
         }
 
-        if (!RateLimiter::hit('message:' . $user['id'] . ':' . $memorial['id'], 6, 600)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('message', (string) $user['id'], (string) $memorial['id']), 6, 600)) {
             Flash::error('留言过于频繁，请稍后再试。');
             return Response::redirect('/m/' . $memorial['slug'] . '#messages');
         }

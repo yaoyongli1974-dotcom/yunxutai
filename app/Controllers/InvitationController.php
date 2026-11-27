@@ -67,6 +67,9 @@ final class InvitationController
     public function accept(Request $request, string $token): Response
     {
         Csrf::verify($request);
+        if (!\App\Core\RateLimiter::hit(\App\Core\RateLimitKeys::make('invitation_accept', (string) (Auth::user()['id'] ?? ''), $request->ip()), 10, 300)) {
+            throw new HttpException(429, '邀请接受尝试过于频繁');
+        }
 
         $familyInvite = $this->familyInvitation($token);
         if ($familyInvite !== null) {

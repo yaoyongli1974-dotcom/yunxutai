@@ -68,7 +68,7 @@ final class PageController
         if (trim((string) $request->input('website', '')) !== '') {
             $errors['form'] = '提交失败，请重试';
         }
-        if (!RateLimiter::hit('service:' . $request->ip(), 5, 3600)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('service', $request->ip()), 5, 3600)) {
             $errors['form'] = '提交过于频繁，请稍后再试';
         }
 

@@ -210,7 +210,7 @@ final class AccountController
                 $errors['memorial_id'] = '仅馆主可申请导出、删除或撤回该纪念馆的授权';
             }
         }
-        if (!RateLimiter::hit('data-request:' . $user['id'], 3, 86400)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('data_request', (string) $user['id']), 3, 86400)) {
             $errors['form'] = '提交过于频繁，请明天再试';
         }
 

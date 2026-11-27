@@ -70,7 +70,7 @@ final class AiController
         if (!(bool) config('ai.charging', false)) {
             // 免费模式才计入每日次数；付费订单待平台确认收款后单独生成任务，不占免费额度。
             $limit = max(1, (int) config('ai.daily_limit', 10));
-            if (!RateLimiter::hit('ai:' . (int) $user['id'] . ':' . (int) $memorial['id'], $limit, 86400)) {
+            if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('ai', (string) $user['id'], (string) $memorial['id']), $limit, 86400)) {
                 Flash::error('今天的 AI 生成次数已用完，请明天再试，或联系平台处理。');
                 return Response::redirect($this->base($memorial) . '/ai');
             }

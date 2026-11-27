@@ -30,6 +30,25 @@ final class RedisCounter implements CounterStore
         return $hits;
     }
 
+    public function consume(string $key, int $max, int $windowSeconds): bool
+    {
+        $script = <<<'LUA'
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local limit = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+if current >= limit then
+  return current + 1
+end
+if current == 0 then
+  redis.call('SET', KEYS[1], 1, 'EX', ttl)
+  return 1
+end
+return redis.call('INCR', KEYS[1])
+LUA;
+        $result = (int) $this->client->command('EVAL', $script, '1', $this->prefix . $key, (string) $max, (string) $windowSeconds);
+        return $result <= $max;
+    }
+
     public function count(string $key): int
     {
         $value = $this->client->command('GET', $this->prefix . $key);

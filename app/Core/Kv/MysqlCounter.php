@@ -30,6 +30,23 @@ final class MysqlCounter implements CounterStore
         return (int) $row['hits'] + 1;
     }
 
+    public function consume(string $key, int $max, int $windowSeconds): bool
+    {
+        $now = date('Y-m-d H:i:s');
+        $newExpiry = date('Y-m-d H:i:s', time() + $windowSeconds);
+        // 单条 UPSERT 完成窗口创建/重置/条件自增，超限不增加计数、不延长窗口。
+        $stmt = Db::query(
+            'INSERT INTO throttle (throttle_key, hits, reset_at) VALUES (?, 1, ?)
+             ON DUPLICATE KEY UPDATE
+                hits = IF(reset_at <= ?, 1, IF(hits >= ?, hits, hits + 1)),
+                reset_at = IF(reset_at <= ?, VALUES(reset_at), reset_at)',
+            [$key, $newExpiry, $now, $max, $now]
+        );
+        // INSERT=1、有实际变化的 UPDATE=2、超限 no-op=0。必须先读 ROW_COUNT()，
+        // 不能在中间执行其它 SQL，否则 PDO 的 last insert 语句计数会被覆盖。
+        return $stmt->rowCount() > 0;
+    }
+
     public function count(string $key): int
     {
         $row = Db::fetch('SELECT hits, reset_at FROM throttle WHERE throttle_key = ?', [$key]);

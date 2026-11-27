@@ -58,7 +58,7 @@ final class ClaimController extends BaseController
             throw ApiException::validation('你已有一条待处理的申请，请耐心等待审核', ['form' => '请勿重复提交']);
         }
 
-        if (!RateLimiter::hit('claim:' . $user['id'], 3, 86400)) {
+        if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('claim', (string) $user['id']), 3, 86400)) {
             throw ApiException::rateLimited('提交过于频繁，请明天再试');
         }
 
