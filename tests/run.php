@@ -2432,6 +2432,137 @@ test('跨家族 Web 访问他人家族返回 404，谱系页包含审核入口',
     check_contains($page['body'], 'name="_token"');
 });
 
+
+// ===== 阶段 D：数字档案馆 =====
+test('阶段 D 迁移全部执行且重复执行安全', function (): void {
+    foreach (range(11, 16) as $n) {
+        $version = '20261127_' . str_pad((string) $n, 3, '0', STR_PAD_LEFT);
+        check(
+            (int) Db::value("SELECT COUNT(*) FROM schema_migrations WHERE version = ? AND status = 'applied'", [$version]) === 1,
+            '阶段 D 迁移缺失：' . $version
+        );
+    }
+    foreach (['archives', 'archive_files', 'archive_tags', 'archive_tag_links', 'archive_person_links', 'archive_versions'] as $table) {
+        check(db_count($table) >= 0, '表不存在：' . $table);
+    }
+});
+
+test('创建档案、编辑保留历史版本、Web 页面可见', function (): void {
+    $owner = make_family_user('arch-owner');
+    $familyId = \App\Services\FamilyService::create($owner, '档案家族', 'arch-family-' . bin2hex(random_bytes(3)));
+    login((string) $owner['email'], 'FamilyTest@123');
+    $createPath = '/families/' . $familyId . '/archives/new';
+    $token = csrf_token($createPath);
+    $created = http('POST', $createPath, [
+        '_token' => $token,
+        'title' => '祖母的嫁妆箱',
+        'archive_type' => 'photo',
+        'privacy' => 'private',
+        'description' => '家族保存的旧照片与说明',
+    ], [], false);
+    check($created['status'] === 302, '创建档案应重定向');
+    $archiveId = (int) Db::value('SELECT id FROM archives WHERE title = ?', ['祖母的嫁妆箱']);
+    check($archiveId > 0, '档案未写入数据库');
+    $show = http('GET', '/archives/' . $archiveId);
+    check($show['status'] === 200, '档案详情应可访问');
+    check_contains($show['body'], '祖母的嫁妆箱');
+    $editToken = csrf_token('/archives/' . $archiveId);
+    $edited = http('POST', '/archives/' . $archiveId . '/edit', [
+        '_token' => $editToken, 'title' => '祖母的嫁妆箱（整理版）', 'privacy' => 'family', 'change_note' => '补全标题',
+    ], [], false);
+    check($edited['status'] === 302, '编辑档案应重定向');
+    check((string) Db::value('SELECT title FROM archives WHERE id = ?', [$archiveId]) === '祖母的嫁妆箱（整理版）', '标题未更新');
+    check(db_count('archive_versions', 'archive_id = ?', [$archiveId]) === 1, '修改前应保存历史版本');
+});
+
+test('档案文件上传记录 SHA-256，授权下载写审计，跨家族 404', function (): void {
+    $owner = make_family_user('arch-file-owner');
+    $other = make_family_user('arch-file-other');
+    $familyId = \App\Services\FamilyService::create($owner, '文件家族', 'arch-file-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '老照片', 'privacy' => 'private']);
+    $tmp = sys_get_temp_dir() . '/archive-test-' . bin2hex(random_bytes(4)) . '.png';
+    $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', true);
+    check(is_string($png), '测试 PNG 解码失败');
+    file_put_contents($tmp, $png);
+
+    login((string) $owner['email'], 'FamilyTest@123');
+    $uploadToken = csrf_token('/archives/' . $archiveId);
+    $upload = http('POST', '/archives/' . $archiveId . '/files', ['_token' => $uploadToken], ['file' => $tmp], false);
+    check($upload['status'] === 302, '上传应重定向');
+    check(db_count('archive_files', 'archive_id = ?', [$archiveId]) === 1, '文件记录缺失');
+    $file = Db::fetch('SELECT * FROM archive_files WHERE archive_id = ? LIMIT 1', [$archiveId]);
+    check((string) $file['sha256'] === hash('sha256', $png), 'SHA-256 与文件内容不符');
+    $download = http('GET', '/archives/files/' . (int) $file['id'] . '/download');
+    check($download['status'] === 200, '授权成员应能下载');
+    check($download['body'] === $png, '下载内容不一致');
+    check(db_count('audit_logs', "action = 'archive.file.download' AND target_id = ?", [(int) $file['id']]) === 1, '下载未写审计');
+
+    login((string) $other['email'], 'FamilyTest@123');
+    check(http('GET', '/archives/' . $archiveId)['status'] === 404, '跨家族查看私密档案应 404');
+    check(http('GET', '/archives/files/' . (int) $file['id'] . '/download')['status'] === 404, '跨家族下载应 404');
+    @unlink($tmp);
+});
+
+test('公开家族的公开档案对访客可见，但下载仍需家族成员权限', function (): void {
+    $owner = make_family_user('arch-public');
+    $other = make_family_user('arch-public-outsider');
+    $familyId = \App\Services\FamilyService::create($owner, '公开家族', 'arch-public-' . bin2hex(random_bytes(3)));
+    Db::update('families', ['privacy' => 'public'], 'id = ?', [$familyId]);
+    \App\Core\Policy::clearCache();
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '公开老照片', 'privacy' => 'public']);
+    $tmp = sys_get_temp_dir() . '/archive-public-' . bin2hex(random_bytes(4)) . '.png';
+    file_put_contents($tmp, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', true));
+    login((string) $owner['email'], 'FamilyTest@123');
+    $token = csrf_token('/archives/' . $archiveId);
+    http('POST', '/archives/' . $archiveId . '/files', ['_token' => $token], ['file' => $tmp]);
+    $fileId = (int) Db::value('SELECT id FROM archive_files WHERE archive_id = ? LIMIT 1', [$archiveId]);
+
+    login((string) $other['email'], 'FamilyTest@123');
+    $show = http('GET', '/archives/' . $archiveId);
+    check($show['status'] === 200, '公开家族的公开档案应可见');
+    check_contains($show['body'], '公开老照片');
+    check(http('GET', '/archives/files/' . $fileId . '/download')['status'] === 404, '非成员下载应拒绝');
+    @unlink($tmp);
+});
+
+test('档案标签与人物关联、删除申请需管理员确认', function (): void {
+    $owner = make_family_user('arch-tag-owner');
+    $familyId = \App\Services\FamilyService::create($owner, '标签家族', 'arch-tag-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '族谱扫描件', 'privacy' => 'family']);
+    $personId = \App\Services\FamilyPersonService::create($owner, $familyId, [
+        'name' => '先祖某人', 'is_deceased' => 1, 'privacy' => 'family', 'birth_date' => '1930-01-01',
+    ]);
+    login((string) $owner['email'], 'FamilyTest@123');
+    $token = csrf_token('/archives/' . $archiveId);
+    check(http('POST', '/archives/' . $archiveId . '/tags', ['_token' => $token, 'name' => '迁徙'], [], false)['status'] === 302, '添加标签失败');
+    check(db_count('archive_tags', 'family_id = ? AND name = ?', [$familyId, '迁徙']) === 1, '标签未持久化');
+    check(http('POST', '/archives/' . $archiveId . '/persons', [
+        '_token' => $token, 'person_id' => $personId, 'relation_type' => 'subject',
+    ], [], false)['status'] === 302, '关联人物失败');
+    check(db_count('archive_person_links', 'archive_id = ? AND person_id = ?', [$archiveId, $personId]) === 1, '关联未持久化');
+
+    check(http('POST', '/archives/' . $archiveId . '/delete-request', ['_token' => $token], [], false)['status'] === 302, '删除申请失败');
+    check((string) Db::value('SELECT status FROM archives WHERE id = ?', [$archiveId]) === 'delete_requested', '未进入待审核');
+    check(http('POST', '/archives/' . $archiveId . '/delete-decision', [
+        '_token' => $token, 'family_id' => $familyId, 'approve' => '1',
+    ], [], false)['status'] === 302, '审批失败');
+    check((string) Db::value('SELECT status FROM archives WHERE id = ?', [$archiveId]) === 'deleted', '软删除未生效');
+    check(http('GET', '/archives/' . $archiveId)['status'] === 404, '已删除档案不可见');
+});
+
+test('伪造 MIME 的文件被拒绝且不产生档案文件记录', function (): void {
+    $owner = make_family_user('arch-mime');
+    $familyId = \App\Services\FamilyService::create($owner, '校验家族', 'arch-mime-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '校验测试', 'privacy' => 'private']);
+    $tmp = sys_get_temp_dir() . '/archive-fake-' . bin2hex(random_bytes(4)) . '.png';
+    file_put_contents($tmp, '这其实不是 PNG 文件');
+    login((string) $owner['email'], 'FamilyTest@123');
+    $token = csrf_token('/archives/' . $archiveId);
+    http('POST', '/archives/' . $archiveId . '/files', ['_token' => $token], ['file' => $tmp]);
+    check(db_count('archive_files', 'archive_id = ?', [$archiveId]) === 0, '非法文件不应入库');
+    @unlink($tmp);
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

@@ -628,3 +628,98 @@ CREATE TABLE IF NOT EXISTS person_merge_log (
             CONSTRAINT fk_merge_duplicate FOREIGN KEY (duplicate_id) REFERENCES family_persons (id) ON DELETE RESTRICT,
             CONSTRAINT fk_merge_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_011_create_archives
+CREATE TABLE IF NOT EXISTS archives (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    family_id BIGINT UNSIGNED NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    description TEXT NULL,
+    archive_type VARCHAR(40) NOT NULL DEFAULT 'document',
+    event_date DATE NULL,
+    location VARCHAR(180) NULL,
+    source_type VARCHAR(40) NOT NULL DEFAULT 'user_input',
+    source_description TEXT NULL,
+    privacy ENUM('private','family','public') NOT NULL DEFAULT 'private',
+    status ENUM('active','archived','delete_requested','deleted') NOT NULL DEFAULT 'active',
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at DATETIME NULL,
+    PRIMARY KEY (id),
+    KEY idx_archive_family (family_id, status, id),
+    KEY idx_archive_event (event_date),
+    CONSTRAINT fk_archives_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+    CONSTRAINT fk_archives_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_012_create_archive_files
+CREATE TABLE IF NOT EXISTS archive_files (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    archive_id BIGINT UNSIGNED NOT NULL,
+    storage_key VARCHAR(500) NOT NULL,
+    original_filename VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(100) NOT NULL,
+    file_size BIGINT UNSIGNED NOT NULL,
+    sha256 CHAR(64) NOT NULL,
+    file_role ENUM('original','thumbnail','restored','preview','transcript','converted') NOT NULL DEFAULT 'original',
+    processing_status ENUM('ready','processing','failed') NOT NULL DEFAULT 'ready',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_archive_storage_key (storage_key),
+    KEY idx_archive_files (archive_id, file_role),
+    CONSTRAINT fk_archive_files_archive FOREIGN KEY (archive_id) REFERENCES archives (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_013_create_archive_tags
+CREATE TABLE IF NOT EXISTS archive_tags (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    family_id BIGINT UNSIGNED NOT NULL,
+    name VARCHAR(60) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_archive_tag (family_id, name),
+    CONSTRAINT fk_archive_tags_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_014_create_archive_tag_links
+CREATE TABLE IF NOT EXISTS archive_tag_links (
+    archive_id BIGINT UNSIGNED NOT NULL,
+    tag_id BIGINT UNSIGNED NOT NULL,
+    PRIMARY KEY (archive_id, tag_id),
+    KEY idx_tag_links_tag (tag_id),
+    CONSTRAINT fk_tag_links_archive FOREIGN KEY (archive_id) REFERENCES archives (id) ON DELETE CASCADE,
+    CONSTRAINT fk_tag_links_tag FOREIGN KEY (tag_id) REFERENCES archive_tags (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_015_create_archive_person_links
+CREATE TABLE IF NOT EXISTS archive_person_links (
+    archive_id BIGINT UNSIGNED NOT NULL,
+    person_id BIGINT UNSIGNED NOT NULL,
+    relation_type VARCHAR(40) NOT NULL DEFAULT 'subject',
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (archive_id, person_id),
+    KEY idx_archive_person_person (person_id),
+    CONSTRAINT fk_apl_archive FOREIGN KEY (archive_id) REFERENCES archives (id) ON DELETE CASCADE,
+    CONSTRAINT fk_apl_person FOREIGN KEY (person_id) REFERENCES family_persons (id) ON DELETE CASCADE,
+    CONSTRAINT fk_apl_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_016_create_archive_versions
+CREATE TABLE IF NOT EXISTS archive_versions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    archive_id BIGINT UNSIGNED NOT NULL,
+    version INT UNSIGNED NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    description TEXT NULL,
+    privacy VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    change_note VARCHAR(255) NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_archive_version (archive_id, version),
+    CONSTRAINT fk_archive_versions_archive FOREIGN KEY (archive_id) REFERENCES archives (id) ON DELETE CASCADE,
+    CONSTRAINT fk_archive_versions_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

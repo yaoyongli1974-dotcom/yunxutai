@@ -135,6 +135,7 @@ final class Policy
     private const RESOURCE_TABLES = [
         'family' => 'families',
         'person' => 'family_persons',
+        'archive' => 'archives',
     ];
 
     /**
@@ -190,7 +191,16 @@ final class Policy
             // unlisted 视为需授权：不能仅凭知道链接访问。
             return ($family['privacy'] ?? '') === 'public';
         }
-        if ($role === null || !in_array($role, $allowedRoles, true)) {
+        if ($role === null) {
+            // 公开家族下的公开档案允许访客查看；其余能力一律拒绝。
+            if ($capability === 'archive.view' && isset($context['resource']['type'], $context['resource']['id'])
+                && $context['resource']['type'] === 'archive'
+                && self::canViewResource('archive', (int) $context['resource']['id'], null)) {
+                return true;
+            }
+            return false;
+        }
+        if (!in_array($role, $allowedRoles, true)) {
             return false;
         }
         if ($capability === 'file.download' && !array_key_exists('resource', $context)) {
@@ -219,7 +229,7 @@ final class Policy
     }
 
     /**
-     * 资源级可见性：家族/人物。资源类型走白名单，查询强制带 family_id。
+     * 资源级可见性：家族/人物/档案。资源类型走白名单，查询强制带 family_id。
      */
     public static function canViewResource(string $type, int $id, ?int $userId): bool
     {
@@ -249,6 +259,16 @@ final class Policy
 
         if ($type === 'family') {
             return true;
+        }
+        if ($type === 'archive') {
+            $privacy = (string) ($resource['privacy'] ?? 'private');
+            if ($privacy === 'private') {
+                return in_array($role, ['owner', 'admin', 'archive_editor'], true);
+            }
+            if ($privacy === 'family') {
+                return $role !== null;
+            }
+            return $privacy === 'public' && ($family['privacy'] ?? '') === 'public';
         }
 
         // 活人资料默认私密；争议资料仅管理员可见。

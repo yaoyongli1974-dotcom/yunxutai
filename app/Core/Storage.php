@@ -74,6 +74,72 @@ final class Storage
         ];
     }
 
+    /**
+     * 数字档案上传：沿用统一 MIME 白名单与随机文件名，返回 SHA-256 供完整性校验。
+     * JPEG 在 GD 可用时重编码以清理 EXIF 等敏感元数据；失败时保留原文件而不中断上传。
+     *
+     * @return array{disk_path:string, original_name:string, mime:string, size_bytes:int, sha256:string, kind:string}
+     */
+    public static function storeArchiveUpload(array $file): array
+    {
+        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            throw new HttpException(422, match ($file['error'] ?? null) {
+                UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => '文件超过服务器允许的大小',
+                UPLOAD_ERR_PARTIAL => '文件上传不完整，请重试',
+                default => '文件上传失败',
+            });
+        }
+        $tmp = (string) ($file['tmp_name'] ?? '');
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            throw new HttpException(422, '无效的上传文件');
+        }
+        $size = (int) ($file['size'] ?? 0);
+        $finfo = new \finfo(FILEINFO_MIME_TYPE);
+        $mime = (string) $finfo->file($tmp);
+        $allowed = (array) config('uploads.allowed', []);
+        if (!isset($allowed[$mime]) || $size <= 0) {
+            throw new HttpException(422, '不支持的文件类型');
+        }
+        $max = str_starts_with($mime, 'video/')
+            ? (int) config('uploads.video_max_bytes')
+            : (int) config('uploads.max_bytes');
+        if ($size > $max) {
+            throw new HttpException(422, '文件大小超出限制');
+        }
+
+        $subdir = 'archives/' . date('Y/m');
+        $directory = self::uploadsPath($subdir);
+        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+            throw new \RuntimeException('无法创建上传目录');
+        }
+        $target = $directory . '/' . bin2hex(random_bytes(16)) . '.' . $allowed[$mime];
+        if (!move_uploaded_file($tmp, $target)) {
+            throw new \RuntimeException('保存上传文件失败');
+        }
+        @chmod($target, 0640);
+
+        if ($mime === 'image/jpeg' && function_exists('imagecreatefromjpeg')) {
+            try {
+                $image = @imagecreatefromjpeg($target);
+                if ($image !== false) {
+                    imagejpeg($image, $target, 88);
+                    imagedestroy($image);
+                }
+            } catch (\Throwable $e) {
+                // 元数据清理失败不影响已通过安全校验的原文件。
+            }
+        }
+
+        return [
+            'disk_path' => $subdir . '/' . basename($target),
+            'original_name' => mb_substr(basename((string) ($file['name'] ?? 'file')), 0, 200),
+            'mime' => $mime,
+            'size_bytes' => (int) filesize($target),
+            'sha256' => (string) hash_file('sha256', $target),
+            'kind' => self::kindFromMime($mime),
+        ];
+    }
+
     public static function kindFromMime(string $mime): string
     {
         if (str_starts_with($mime, 'image/')) {

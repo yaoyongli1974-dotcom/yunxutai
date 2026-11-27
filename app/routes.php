@@ -17,6 +17,7 @@ use App\Controllers\Admin\UserController as AdminUserController;
 use App\Controllers\Admin\VerificationController as AdminVerificationController;
 use App\Controllers\AuthController;
 use App\Controllers\DashboardController;
+use App\Controllers\ArchiveController;
 use App\Controllers\FamilyController;
 use App\Controllers\FamilyPersonController;
 use App\Controllers\GenealogyController;
@@ -172,6 +173,19 @@ $router->post('/manage/memorials/{id}/moderation/messages/{messageId}', [ManageM
 $router->post('/manage/memorials/{id}/moderation/tributes/{tributeId}', [ManageModerationController::class, 'tributeStatus'], ['auth']);
 
 // 平台运营后台
+// 阶段 D：数字档案馆（家族资源统一走 ArchiveService + Policy）
+$router->get('/families/{id}/archives', [ArchiveController::class, 'index'], ['auth']);
+$router->get('/families/{id}/archives/new', [ArchiveController::class, 'create'], ['auth']);
+$router->post('/families/{id}/archives/new', [ArchiveController::class, 'store'], ['auth']);
+$router->get('/archives/files/{id}/download', [ArchiveController::class, 'download'], ['auth']);
+$router->get('/archives/{id}', [ArchiveController::class, 'show'], ['auth']);
+$router->post('/archives/{id}/edit', [ArchiveController::class, 'update'], ['auth']);
+$router->post('/archives/{id}/files', [ArchiveController::class, 'upload'], ['auth']);
+$router->post('/archives/{id}/tags', [ArchiveController::class, 'addTag'], ['auth']);
+$router->post('/archives/{id}/persons', [ArchiveController::class, 'linkPerson'], ['auth']);
+$router->post('/archives/{id}/delete-request', [ArchiveController::class, 'requestDelete'], ['auth']);
+$router->post('/archives/{id}/delete-decision', [ArchiveController::class, 'decideDelete'], ['auth']);
+
 $router->get('/admin', [AdminDashboardController::class, 'index'], ['admin']);
 $router->get('/admin/memorials', [AdminMemorialController::class, 'index'], ['admin']);
 $router->get('/admin/memorials/{id}', [AdminMemorialController::class, 'show'], ['admin']);
