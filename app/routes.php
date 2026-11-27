@@ -17,6 +17,9 @@ use App\Controllers\Admin\UserController as AdminUserController;
 use App\Controllers\Admin\VerificationController as AdminVerificationController;
 use App\Controllers\AuthController;
 use App\Controllers\DashboardController;
+use App\Controllers\FamilyController;
+use App\Controllers\FamilyPersonController;
+use App\Controllers\GenealogyController;
 use App\Controllers\HomeController;
 use App\Controllers\InvitationController;
 use App\Controllers\Manage\AiController as ManageAiController;
@@ -88,6 +91,37 @@ $router->post('/m/{slug}/claim', [MemorialController::class, 'claimStore'], ['au
 // 邀请
 $router->get('/invitations/{token}', [InvitationController::class, 'show'], ['auth']);
 $router->post('/invitations/{token}', [InvitationController::class, 'accept'], ['auth']);
+
+// 云叙台 2.0：家族空间、人物与谱系（阶段 C）
+$router->get('/families', [FamilyController::class, 'index'], ['auth']);
+$router->get('/families/new', [FamilyController::class, 'create'], ['auth']);
+$router->post('/families', [FamilyController::class, 'store'], ['auth']);
+$router->get('/families/{id}', [FamilyController::class, 'show'], ['auth']);
+$router->get('/families/{id}/edit', [FamilyController::class, 'edit'], ['auth']);
+$router->post('/families/{id}/edit', [FamilyController::class, 'update'], ['auth']);
+$router->get('/families/{id}/members', [FamilyController::class, 'members'], ['auth']);
+$router->post('/families/{id}/members/invite', [FamilyController::class, 'invite'], ['auth']);
+$router->post('/families/{id}/members/{userId}/role', [FamilyController::class, 'updateRole'], ['auth']);
+$router->post('/families/{id}/members/{userId}/remove', [FamilyController::class, 'removeMember'], ['auth']);
+$router->post('/families/{id}/invitations/{invitationId}/revoke', [FamilyController::class, 'revokeInvitation'], ['auth']);
+$router->post('/families/{id}/leave', [FamilyController::class, 'leave'], ['auth']);
+
+$router->get('/families/{id}/persons', [FamilyPersonController::class, 'index'], ['auth']);
+$router->get('/families/{id}/persons/new', [FamilyPersonController::class, 'create'], ['auth']);
+$router->post('/families/{id}/persons', [FamilyPersonController::class, 'store'], ['auth']);
+$router->get('/families/{id}/persons/merge', [FamilyPersonController::class, 'mergeForm'], ['auth']);
+$router->post('/families/{id}/persons/merge', [FamilyPersonController::class, 'merge'], ['auth']);
+$router->get('/families/{id}/persons/{personId}', [FamilyPersonController::class, 'show'], ['auth']);
+$router->get('/families/{id}/persons/{personId}/edit', [FamilyPersonController::class, 'edit'], ['auth']);
+$router->post('/families/{id}/persons/{personId}/edit', [FamilyPersonController::class, 'update'], ['auth']);
+$router->post('/families/{id}/persons/{personId}/memorial', [FamilyPersonController::class, 'linkMemorial'], ['auth']);
+$router->post('/families/{id}/persons/{personId}/branch', [GenealogyController::class, 'assignBranch'], ['auth']);
+
+$router->get('/families/{id}/genealogy', [GenealogyController::class, 'index'], ['auth']);
+$router->post('/families/{id}/genealogy/relationships', [GenealogyController::class, 'submit'], ['auth']);
+$router->post('/families/{id}/genealogy/relationships/{relationId}/review', [GenealogyController::class, 'review'], ['auth']);
+$router->post('/families/{id}/genealogy/relationships/{relationId}/revoke', [GenealogyController::class, 'revoke'], ['auth']);
+$router->post('/families/{id}/genealogy/branches', [GenealogyController::class, 'createBranch'], ['auth']);
 
 // 纪念馆管理
 $router->get('/manage', static fn () => Response::redirect('/dashboard'), ['auth']);

@@ -551,3 +551,80 @@ CREATE TABLE IF NOT EXISTS person_memorial_links (
             CONSTRAINT fk_links_memorial FOREIGN KEY (memorial_id) REFERENCES memorials (id) ON DELETE RESTRICT,
             CONSTRAINT fk_links_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_007_create_person_relationships
+CREATE TABLE IF NOT EXISTS person_relationships (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            family_id BIGINT UNSIGNED NOT NULL,
+            person_a_id BIGINT UNSIGNED NOT NULL,
+            person_b_id BIGINT UNSIGNED NOT NULL,
+            relationship_type ENUM('parent','child','spouse','sibling','adoptive_parent','adoptive_child','step_parent','step_child','other') NOT NULL,
+            direction ENUM('a_to_b','bidirectional') NOT NULL DEFAULT 'a_to_b',
+            status ENUM('pending','confirmed','disputed','rejected','revoked') NOT NULL DEFAULT 'pending',
+            source_type ENUM('user_input','archive_ocr','ai_extraction','oral_history','imported') NOT NULL DEFAULT 'user_input',
+            source_id VARCHAR(190) DEFAULT NULL,
+            note VARCHAR(255) DEFAULT NULL,
+            submitted_by BIGINT UNSIGNED NOT NULL,
+            reviewed_by BIGINT UNSIGNED DEFAULT NULL,
+            reviewed_at DATETIME DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_rel_family_status (family_id, status),
+            KEY idx_rel_a (person_a_id, relationship_type),
+            KEY idx_rel_b (person_b_id, relationship_type),
+            CONSTRAINT fk_rel_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+            CONSTRAINT fk_rel_a FOREIGN KEY (person_a_id) REFERENCES family_persons (id) ON DELETE CASCADE,
+            CONSTRAINT fk_rel_b FOREIGN KEY (person_b_id) REFERENCES family_persons (id) ON DELETE CASCADE,
+            CONSTRAINT fk_rel_submitter FOREIGN KEY (submitted_by) REFERENCES users (id) ON DELETE RESTRICT,
+            CONSTRAINT fk_rel_reviewer FOREIGN KEY (reviewed_by) REFERENCES users (id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_008_create_family_branches
+CREATE TABLE IF NOT EXISTS family_branches (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            family_id BIGINT UNSIGNED NOT NULL,
+            parent_branch_id BIGINT UNSIGNED DEFAULT NULL,
+            name VARCHAR(190) NOT NULL,
+            description TEXT DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_branch_family (family_id, parent_branch_id),
+            CONSTRAINT fk_branch_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+            CONSTRAINT fk_branch_parent FOREIGN KEY (parent_branch_id) REFERENCES family_branches (id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_009_create_person_branch_members
+CREATE TABLE IF NOT EXISTS person_branch_members (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            family_id BIGINT UNSIGNED NOT NULL,
+            person_id BIGINT UNSIGNED NOT NULL,
+            branch_id BIGINT UNSIGNED NOT NULL,
+            created_by BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_person_branch (person_id, branch_id),
+            KEY idx_branch_members (branch_id),
+            CONSTRAINT fk_pbm_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+            CONSTRAINT fk_pbm_person FOREIGN KEY (person_id) REFERENCES family_persons (id) ON DELETE CASCADE,
+            CONSTRAINT fk_pbm_branch FOREIGN KEY (branch_id) REFERENCES family_branches (id) ON DELETE CASCADE,
+            CONSTRAINT fk_pbm_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_010_create_person_merge_log
+CREATE TABLE IF NOT EXISTS person_merge_log (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            family_id BIGINT UNSIGNED NOT NULL,
+            primary_id BIGINT UNSIGNED NOT NULL,
+            duplicate_id BIGINT UNSIGNED NOT NULL,
+            created_by BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_merged_duplicate (duplicate_id),
+            KEY idx_merge_primary (primary_id),
+            CONSTRAINT fk_merge_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+            CONSTRAINT fk_merge_primary FOREIGN KEY (primary_id) REFERENCES family_persons (id) ON DELETE RESTRICT,
+            CONSTRAINT fk_merge_duplicate FOREIGN KEY (duplicate_id) REFERENCES family_persons (id) ON DELETE RESTRICT,
+            CONSTRAINT fk_merge_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

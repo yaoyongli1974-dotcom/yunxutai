@@ -2158,8 +2158,18 @@ function make_family_user(string $label): array
 }
 
 test('2.0 迁移版本记录完整且可重复执行', function (): void {
-    check(db_count('schema_migrations') === 6, '应记录 6 个 2.0 迁移版本');
-    check(db_count('schema_migrations', "status = 'applied'") === 6, '所有迁移应为 applied');
+    // 迁移数量随阶段增加；只校验每个已登记版本与阶段 B 基线版本均为 applied。
+    $expected = [
+        '20261127_001', '20261127_002', '20261127_003', '20261127_004', '20261127_005', '20261127_006',
+    ];
+    check(db_count('schema_migrations') >= count($expected), '2.0 迁移记录不应少于阶段 B 基线');
+    check(db_count('schema_migrations', "status = 'applied'") === db_count('schema_migrations'), '所有迁移应为 applied');
+    foreach ($expected as $version) {
+        check(
+            (int) \App\Core\Db::value("SELECT COUNT(*) FROM schema_migrations WHERE version = ? AND status = 'applied'", [$version]) === 1,
+            '基线迁移缺失或未执行：' . $version
+        );
+    }
     $checksums = \App\Core\Db::fetchAll('SELECT version, checksum FROM schema_migrations');
     foreach ($checksums as $row) {
         check((string) $row['checksum'] !== '', '迁移 checksum 不应为空');
@@ -2280,6 +2290,146 @@ test('角色调整必须写审计且禁止自审式越权', function (): void {
     check(\App\Core\Policy::familyRole($familyId, (int) $member['id']) === 'admin', '角色调整未生效');
     check(db_count('audit_logs', "action = 'family.member.role' AND target_id = ?", [$familyId]) === 1, '角色调整未写审计');
     expect_http_error(static fn () => \App\Services\FamilyService::updateRole($owner, $familyId, (int) $owner['id'], 'member'), 403, 'owner 不应被降级');
+});
+
+
+echo "\n[阶段 C：家族空间、人物与谱系]\n";
+
+test('Web 创建家族并访问家族主页与成员页', function (): void {
+    $owner = make_family_user('web-family');
+    login((string) $owner['email'], 'FamilyTest@123');
+    $token = csrf_token('/families/new');
+    $response = http('POST', '/families', [
+        '_token' => $token, 'name' => '网页测试家族', 'slug' => 'web-family-' . bin2hex(random_bytes(3)),
+        'privacy' => 'public', 'description' => '由集成测试创建',
+    ]);
+    check($response['status'] === 200, '创建家族失败：' . $response['status']);
+    check(preg_match('#/families/(\d+)$#', $response['url'], $m) === 1, '创建后未跳转家族主页');
+    $familyId = (int) $m[1];
+    $show = http('GET', '/families/' . $familyId);
+    check_contains($show['body'], '网页测试家族');
+    $members = http('GET', '/families/' . $familyId . '/members');
+    check_contains($members['body'], '创建邀请');
+    check_contains($members['body'], 'name="_token"');
+});
+
+test('Web 家族邀请可被受邀邮箱本人接受', function (): void {
+    $owner = make_family_user('web-invite-owner');
+    $member = make_family_user('web-invite-member');
+    $familyId = \App\Services\FamilyService::create($owner, '邀请测试', 'web-invite-' . bin2hex(random_bytes(3)));
+    $invite = \App\Services\FamilyService::invite($owner, $familyId, (string) $member['email'], 'genealogy_editor');
+    login((string) $member['email'], 'FamilyTest@123');
+    $token = csrf_token('/invitations/' . $invite['token']);
+    $response = http('POST', '/invitations/' . $invite['token'], ['_token' => $token]);
+    check($response['status'] === 200, '接受家族邀请失败');
+    check(effective_path($response['url']) === '/families/' . $familyId, '未跳转到家族主页');
+    check(\App\Core\Policy::familyRole($familyId, (int) $member['id']) === 'genealogy_editor', '邀请角色未生效');
+});
+
+test('Web 新增人物与详情页；活人隐私约束无法通过表单绕过', function (): void {
+    $owner = make_family_user('web-person');
+    $familyId = \App\Services\FamilyService::create($owner, '人物页面', 'web-person-' . bin2hex(random_bytes(3)), ['privacy' => 'public']);
+    login((string) $owner['email'], 'FamilyTest@123');
+    $token = csrf_token('/families/' . $familyId . '/persons/new');
+    $response = http('POST', '/families/' . $familyId . '/persons', [
+        '_token' => $token, 'name' => '网页人物', 'is_deceased' => '1', 'privacy' => 'family',
+        'birth_date' => '1930-01-02', 'biography' => '生平资料',
+    ]);
+    check(preg_match('#/families/' . $familyId . '/persons/(\d+)$#', $response['url'], $m) === 1, '人物创建失败');
+    $personId = (int) $m[1];
+    $show = http('GET', '/families/' . $familyId . '/persons/' . $personId);
+    check_contains($show['body'], '网页人物');
+    check_contains($show['body'], '关联纪念馆');
+    $token2 = csrf_token('/families/' . $familyId . '/persons/new');
+    $bad = http('POST', '/families/' . $familyId . '/persons', [
+        '_token' => $token2, 'name' => '活人', 'is_deceased' => '', 'privacy' => 'public',
+    ]);
+    check($bad['status'] === 422, '活人公开应被拒绝，实际 ' . $bad['status']);
+});
+
+test('亲属关系：提交为待审核，确认后进入谱系，撤销后消失', function (): void {
+    $owner = make_family_user('rel-owner');
+    $familyId = \App\Services\FamilyService::create($owner, '关系测试', 'rel-' . bin2hex(random_bytes(3)), ['privacy' => 'public']);
+    $a = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '父亲', 'is_deceased' => 1, 'privacy' => 'public']);
+    $b = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '子女', 'is_deceased' => 1, 'privacy' => 'public']);
+    Db::update('family_persons', ['verification_status' => 'verified'], 'id = ?', [$a]);
+    Db::update('family_persons', ['verification_status' => 'verified'], 'id = ?', [$b]);
+    \App\Core\Policy::clearCache();
+    $relId = \App\Services\GenealogyService::submit($owner, $familyId, $a, $b, 'parent');
+    check((string) \App\Core\Db::value('SELECT status FROM person_relationships WHERE id = ?', [$relId]) === 'pending', '关系不得自动确认');
+    $tree = \App\Services\GenealogyService::tree($owner, $familyId);
+    check($tree['relations'] === [], '待审核关系不应进入谱系');
+    \App\Services\GenealogyService::review($owner, $familyId, $relId, 'confirmed');
+    $tree = \App\Services\GenealogyService::tree($owner, $familyId);
+    check(count($tree['relations']) === 1, '确认后关系应进入谱系');
+    $inverse = \App\Services\GenealogyService::RELATION_TYPES['parent']['inverse'];
+    check($inverse === 'child', '反向关系定义错误');
+    \App\Services\GenealogyService::revoke($owner, $familyId, $relId);
+    $tree = \App\Services\GenealogyService::tree($owner, $familyId);
+    check($tree['relations'] === [], '撤销后关系不应显示在谱系');
+});
+
+test('关系安全：自关联、重复、血缘循环与跨家族关系均被拒绝', function (): void {
+    $owner = make_family_user('rel-safe');
+    $familyId = \App\Services\FamilyService::create($owner, '关系安全', 'rel-safe-' . bin2hex(random_bytes(3)));
+    $a = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '祖父', 'is_deceased' => 1]);
+    $b = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '父亲', 'is_deceased' => 1]);
+    $c = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '孙子', 'is_deceased' => 1]);
+    expect_http_error(static fn () => \App\Services\GenealogyService::submit($owner, $familyId, $a, $a, 'parent'), 422, '自关联应拒绝');
+    $r1 = \App\Services\GenealogyService::submit($owner, $familyId, $a, $b, 'parent');
+    \App\Services\GenealogyService::review($owner, $familyId, $r1, 'confirmed');
+    expect_http_error(static fn () => \App\Services\GenealogyService::submit($owner, $familyId, $a, $b, 'parent'), 409, '重复关系应拒绝');
+    expect_http_error(static fn () => \App\Services\GenealogyService::submit($owner, $familyId, $b, $a, 'parent'), 422, '血缘循环应拒绝');
+    $outsider = make_family_user('rel-outsider');
+    $other = \App\Services\FamilyService::create($outsider, '外部家族', 'rel-out-' . bin2hex(random_bytes(3)));
+    $outsidePerson = \App\Services\FamilyPersonService::create($outsider, $other, ['name' => '外人', 'is_deceased' => 1]);
+    expect_http_error(static fn () => \App\Services\GenealogyService::submit($owner, $familyId, $a, $outsidePerson, 'spouse'), 404, '跨家族人物不可建立关系');
+});
+
+test('支系创建与分配，重复分配不产生重复关联', function (): void {
+    $owner = make_family_user('branch-owner');
+    $familyId = \App\Services\FamilyService::create($owner, '支系测试', 'branch-' . bin2hex(random_bytes(3)));
+    $personId = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '支系人物', 'is_deceased' => 1]);
+    $branchId = \App\Services\GenealogyService::createBranch($owner, $familyId, '长房', null);
+    $childId = \App\Services\GenealogyService::createBranch($owner, $familyId, '长房一支', $branchId);
+    \App\Services\GenealogyService::assignBranch($owner, $familyId, $personId, $childId);
+    \App\Services\GenealogyService::assignBranch($owner, $familyId, $personId, $childId);
+    check(db_count('person_branch_members', 'person_id = ? AND branch_id = ?', [$personId, $childId]) === 1, '支系关联不应重复');
+    check(count(\App\Services\GenealogyService::branches($owner, $familyId)) === 2, '支系数目不正确');
+});
+
+test('人物合并保留纪念馆关联与审计，重复人物软删除可追溯', function (): void {
+    $owner = make_family_user('merge-owner');
+    $familyId = \App\Services\FamilyService::create($owner, '合并测试', 'merge-' . bin2hex(random_bytes(3)));
+    $primary = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '同名', 'is_deceased' => 1]);
+    $duplicate = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '同名', 'is_deceased' => 1]);
+    $memorialId = (int) Db::value("SELECT id FROM memorials WHERE status = 'active' LIMIT 1");
+    check($memorialId > 0, '缺少可关联的纪念馆');
+    Db::insert('memorial_members', [
+        'memorial_id' => $memorialId, 'user_id' => (int) $owner['id'], 'role' => 'editor', 'status' => 'active',
+    ]);
+    \App\Core\Policy::clearCache();
+    \App\Services\FamilyPersonService::linkMemorial($owner, $familyId, $duplicate, $memorialId);
+    check(db_count('person_memorial_links', 'person_id = ?', [$duplicate]) === 1, '关联未建立');
+    \App\Services\GenealogyService::mergePersons($owner, $familyId, $primary, $duplicate);
+    check(db_count('person_memorial_links', 'person_id = ?', [$duplicate]) === 0, '关联未迁移');
+    check(db_count('person_memorial_links', 'person_id = ?', [$primary]) === 1, '主人物未继承关联');
+    check(db_count('person_merge_log', 'duplicate_id = ?', [$duplicate]) === 1, '缺少合并追溯记录');
+    check((string) Db::value('SELECT deleted_at FROM family_persons WHERE id = ?', [$duplicate]) !== '', '重复人物应软删除');
+    check(db_count('audit_logs', "action = 'person.merge' AND target_id = ?", [$primary]) === 1, '合并未写审计');
+});
+
+test('跨家族 Web 访问他人家族返回 404，谱系页包含审核入口', function (): void {
+    $ownerA = make_family_user('iso-web-a');
+    $ownerB = make_family_user('iso-web-b');
+    $familyA = \App\Services\FamilyService::create($ownerA, '甲家族', 'iso-web-a-' . bin2hex(random_bytes(3)));
+    $familyB = \App\Services\FamilyService::create($ownerB, '乙家族', 'iso-web-b-' . bin2hex(random_bytes(3)));
+    login((string) $ownerB['email'], 'FamilyTest@123');
+    check(http('GET', '/families/' . $familyA)['status'] === 404, '跨家族访问应返回 404');
+    $page = http('GET', '/families/' . $familyB . '/genealogy');
+    check($page['status'] === 200, '谱系页应可访问');
+    check_contains($page['body'], '提交关系候选');
+    check_contains($page['body'], 'name="_token"');
 });
 
 echo "\n========== 结果 ==========\n";

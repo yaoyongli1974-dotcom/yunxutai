@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Audit;
+use App\Core\Db;
 use App\Core\Auth;
 use App\Core\Csrf;
 use App\Core\Flash;
@@ -15,11 +16,38 @@ use App\Core\View;
 use App\Models\Invitation;
 use App\Models\Member;
 use App\Models\Memorial;
+use App\Services\FamilyService;
 
 final class InvitationController
 {
+    /** 家族邀请令牌与纪念馆邀请令牌互不冲突：先按 sha256 查家族邀请。 */
+    private function familyInvitation(string $token): ?array
+    {
+        if ($token === '') {
+            return null;
+        }
+        return Db::fetch(
+            'SELECT i.*, f.name AS family_name FROM family_invitations i
+             JOIN families f ON f.id = i.family_id
+             WHERE i.token_hash = ? AND i.status = ? LIMIT 1',
+            [hash('sha256', $token), 'pending']
+        );
+    }
+
     public function show(Request $request, string $token): Response
     {
+        $familyInvite = $this->familyInvitation($token);
+        if ($familyInvite !== null) {
+            $user = Auth::user();
+            return View::render('family/invitation', [
+                'title' => '家族邀请',
+                'invitation' => $familyInvite,
+                'token' => $token,
+                'emailMatches' => strtolower((string) ($user['email'] ?? '')) === strtolower((string) $familyInvite['email']),
+                'noindex' => true,
+            ]);
+        }
+
         $invitation = Invitation::findOpenByToken($token);
         if ($invitation === null) {
             return View::render('invitations/invalid', ['title' => '邀请已失效'], 'layout', 404);
@@ -39,6 +67,13 @@ final class InvitationController
     public function accept(Request $request, string $token): Response
     {
         Csrf::verify($request);
+
+        $familyInvite = $this->familyInvitation($token);
+        if ($familyInvite !== null) {
+            $familyId = FamilyService::acceptInvitation(Auth::user(), $token);
+            Flash::success('已加入家族：' . (string) $familyInvite['family_name'] . '。');
+            return Response::redirect('/families/' . $familyId);
+        }
 
         $invitation = Invitation::findOpenByToken($token);
         if ($invitation === null) {
