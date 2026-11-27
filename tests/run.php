@@ -2563,6 +2563,115 @@ test('伪造 MIME 的文件被拒绝且不产生档案文件记录', function ()
     @unlink($tmp);
 });
 
+
+test('阶段 E：AI 工作流迁移与幂等创建', function (): void {
+    check(db_count('schema_migrations', "version LIKE '20261127_0%' AND status = 'applied'") >= 21, '阶段 E 迁移未全部应用');
+    $owner = make_family_user('ai-idem');
+    $familyId = \App\Services\FamilyService::create($owner, 'AI 幂等家族', 'ai-idem-' . bin2hex(random_bytes(3)));
+    $first = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', ['text' => '1990年3月，父亲从北方迁往南方。'], 'same-key');
+    $second = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', ['text' => '不同内容'], 'same-key');
+    check($first === $second, '同一幂等键应返回同一任务');
+    check(db_count('ai_workflows', 'family_id = ?', [$familyId]) === 1, '幂等键未阻止重复任务');
+    check(db_count('ai_workflow_steps', 'workflow_id = ?', [$first]) === 3, '步骤未按类型初始化');
+});
+
+test('阶段 E：AI 输出仅生成待审核候选，不自动成为事实', function (): void {
+    $owner = make_family_user('ai-draft');
+    $familyId = \App\Services\FamilyService::create($owner, 'AI 草稿家族', 'ai-draft-' . bin2hex(random_bytes(3)));
+    login((string) $owner['email'], 'FamilyTest@123');
+    $token = csrf_token('/families/' . $familyId . '/ai');
+    check(http('POST', '/families/' . $familyId . '/ai/workflows', [
+        '_token' => $token, 'type' => 'extract_facts', 'text' => "1990年3月，父亲从北方迁往南方。母亲后来也到了南方。",
+    ], [], false)['status'] === 302, '创建 AI 任务失败');
+    $id = (int) Db::value('SELECT id FROM ai_workflows WHERE family_id = ? ORDER BY id DESC LIMIT 1', [$familyId]);
+    $runToken = csrf_token('/families/' . $familyId . '/ai/workflows/' . $id);
+    check(http('POST', '/families/' . $familyId . '/ai/workflows/' . $id . '/run', ['_token' => $runToken], [], false)['status'] === 302, '执行 AI 任务失败');
+    check((string) Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) === 'completed', '任务未完成');
+    $output = json_decode((string) Db::value('SELECT output_json FROM ai_workflows WHERE id = ?', [$id]), true) ?: [];
+    check(isset($output['content'], $output['facts']), '任务缺少草稿输出');
+    check(count($output['facts']) >= 2, '未提取到候选事实');
+    foreach ($output['facts'] as $fact) {
+        check($fact['verification_status'] === 'pending', 'AI 候选不得自动确认');
+    }
+    check(db_count('ai_generation_logs', 'workflow_id = ?', [$id]) === 1, '未记录生成来源');
+    check(db_count('memory_facts', 'family_id = ? AND verification_status = ?', [$familyId, 'confirmed']) === 0, 'AI 生成内容被自动确认为事实');
+});
+
+test('阶段 E：事实审核只允许家族管理员，跨家族输入被拒绝', function (): void {
+    $owner = make_family_user('ai-review-owner');
+    $member = make_family_user('ai-review-member');
+    $other = make_family_user('ai-review-other');
+    $familyId = \App\Services\FamilyService::create($owner, 'AI 审核家族', 'ai-review-' . bin2hex(random_bytes(3)));
+    \App\Services\FamilyService::invite($owner, $familyId, (string) $member['email'], 'member');
+    $personId = \App\Services\FamilyPersonService::create($owner, $familyId, [
+        'name' => '审核人物', 'gender' => 'male', 'birth_date' => '1930-01-01', 'privacy' => 'private',
+    ]);
+    $factId = \App\Services\AiWorkflowService::addFactCandidate($owner, $familyId, 'event', '1990年迁居（待核实）', 'ai_extraction', null, $personId);
+    try {
+        \App\Services\AiWorkflowService::reviewFact($member, $factId, 'confirmed');
+        check(false, '普通成员不应能确认事实');
+    } catch (\App\Core\HttpException $e) {
+        check(true, '普通成员越权被拒绝');
+    }
+    \App\Services\AiWorkflowService::reviewFact($owner, $factId, 'confirmed');
+    check((string) Db::value('SELECT verification_status FROM memory_facts WHERE id = ?', [$factId]) === 'confirmed', '审核未生效');
+
+    $otherFamily = \App\Services\FamilyService::create($other, '他族', 'ai-other-' . bin2hex(random_bytes(3)));
+    try {
+        \App\Services\AiWorkflowService::create($other, $otherFamily, 'extract_facts', ['text' => '资料', 'person_id' => $personId]);
+        check(false, '跨家族人物输入不应通过');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 404, '跨家族越权应返回 404');
+    }
+    check(db_count('ai_workflows', 'family_id = ?', [$otherFamily]) === 0, '越权请求不应创建任务');
+});
+
+test('阶段 E：Worker 原子领取、租约恢复与取消', function (): void {
+    $owner = make_family_user('ai-worker');
+    $familyId = \App\Services\FamilyService::create($owner, 'AI 队列家族', 'ai-worker-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'family_history_draft', ['text' => '家族史资料']);
+    $claimed = \App\Services\AiWorkflowService::claim('worker-a', 5);
+    check(in_array($id, $claimed, true), '任务未被领取');
+    check(\App\Services\AiWorkflowService::claim('worker-b', 5) === [], '同一任务不应被重复领取');
+    Db::update('ai_workflows', ['lease_until' => date('Y-m-d H:i:s', time() - 60)], 'id = ?', [$id]);
+    $recovered = \App\Services\AiWorkflowService::recoverExpired();
+    check($recovered['expired'] >= 1, '超时租约未回收');
+    check((string) Db::value('SELECT failure_class FROM ai_workflows WHERE id = ?', [$id]) === 'lease_expired', '未记录租约超时');
+    check(db_count('ai_workflows', 'id = ? AND status IN (\'queued\',\'failed\')', [$id]) === 1, '任务未进入可重试状态');
+    \App\Services\AiWorkflowService::cancel($owner, $id);
+    check((string) Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) === 'cancelled', '取消任务失败');
+    check(\App\Services\AiWorkflowService::claim('worker-c', 5) === [], '已取消任务不应被领取');
+});
+
+test('阶段 E：口述历史授权前不可录入，撤回后不可复核', function (): void {
+    $owner = make_family_user('ai-oral');
+    $familyId = \App\Services\FamilyService::create($owner, '口述家族', 'ai-oral-' . bin2hex(random_bytes(3)));
+    $sessionId = \App\Services\AiWorkflowService::createOralSession($owner, $familyId, ['title' => '祖辈访谈', 'topic' => '家族迁徙']);
+    try {
+        \App\Services\AiWorkflowService::addSegment($owner, $sessionId, ['transcript' => '我小时候住在北方']);
+        check(false, '未授权不应录入转写');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 422, '未授权录入应返回 422');
+    }
+    \App\Services\AiWorkflowService::setConsent($owner, $sessionId, true);
+    $segmentId = \App\Services\AiWorkflowService::addSegment($owner, $sessionId, ['transcript' => '我小时候住在北方', 'speaker' => '受访者']);
+    \App\Services\AiWorkflowService::reviewSegment($owner, $segmentId, true, '小时候住在北方');
+    check((string) Db::value('SELECT review_status FROM oral_history_segments WHERE id = ?', [$segmentId]) === 'confirmed', '片段审核未生效');
+    \App\Services\AiWorkflowService::setConsent($owner, $sessionId, false);
+    try {
+        \App\Services\AiWorkflowService::reviewSegment($owner, $segmentId, true);
+        check(false, '撤回授权后仍可复核');
+    } catch (\App\Core\HttpException $e) {
+        check(true, '授权撤回后复核被拒绝');
+    }
+    try {
+        \App\Services\AiWorkflowService::create($owner, $familyId, 'transcribe_audio', ['session_id' => $sessionId]);
+        check(false, '撤回授权后仍可发起转写');
+    } catch (\App\Core\HttpException $e) {
+        check(true, '撤回授权后转写任务被拒绝');
+    }
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

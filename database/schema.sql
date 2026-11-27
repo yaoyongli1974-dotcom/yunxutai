@@ -723,3 +723,140 @@ CREATE TABLE IF NOT EXISTS archive_versions (
     CONSTRAINT fk_archive_versions_archive FOREIGN KEY (archive_id) REFERENCES archives (id) ON DELETE CASCADE,
     CONSTRAINT fk_archive_versions_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 2.0 阶段 E：AI 家族记忆工坊
+CREATE TABLE IF NOT EXISTS ai_workflows (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    family_id BIGINT UNSIGNED NOT NULL,
+    workflow_type VARCHAR(40) NOT NULL,
+    status ENUM('queued','processing','completed','failed','cancelled') NOT NULL DEFAULT 'queued',
+    idempotency_key VARCHAR(64) NOT NULL,
+    input_json JSON NOT NULL,
+    output_json JSON DEFAULT NULL,
+    current_step VARCHAR(60) DEFAULT NULL,
+    provider VARCHAR(40) NOT NULL DEFAULT 'demo',
+    prompt_version VARCHAR(40) NOT NULL DEFAULT 'v1',
+    error_message VARCHAR(500) DEFAULT NULL,
+    failure_class VARCHAR(40) DEFAULT NULL,
+    retry_count INT UNSIGNED NOT NULL DEFAULT 0,
+    max_retries INT UNSIGNED NOT NULL DEFAULT 3,
+    run_after DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lease_until DATETIME DEFAULT NULL,
+    locked_by VARCHAR(64) DEFAULT NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    started_at DATETIME DEFAULT NULL,
+    finished_at DATETIME DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_ai_workflow_idem (family_id, workflow_type, idempotency_key),
+    KEY idx_ai_workflow_status (status, run_after),
+    KEY idx_ai_workflow_family (family_id, created_at),
+    CONSTRAINT fk_ai_workflow_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+    CONSTRAINT fk_ai_workflow_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ai_workflow_steps (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    workflow_id BIGINT UNSIGNED NOT NULL,
+    step_no INT UNSIGNED NOT NULL,
+    name VARCHAR(60) NOT NULL,
+    status ENUM('queued','processing','completed','failed','skipped') NOT NULL DEFAULT 'queued',
+    input_ref VARCHAR(255) DEFAULT NULL,
+    output_ref VARCHAR(255) DEFAULT NULL,
+    error_message VARCHAR(500) DEFAULT NULL,
+    started_at DATETIME DEFAULT NULL,
+    finished_at DATETIME DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_ai_workflow_step (workflow_id, step_no),
+    CONSTRAINT fk_ai_step_workflow FOREIGN KEY (workflow_id) REFERENCES ai_workflows (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS memory_facts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    family_id BIGINT UNSIGNED NOT NULL,
+    person_id BIGINT UNSIGNED DEFAULT NULL,
+    fact_type VARCHAR(40) NOT NULL,
+    fact_content TEXT NOT NULL,
+    source_type ENUM('user_input','oral_history','archive_ocr','ai_extraction','family_confirmation','imported') NOT NULL,
+    source_id BIGINT UNSIGNED DEFAULT NULL,
+    source_location VARCHAR(255) DEFAULT NULL,
+    confidence DECIMAL(4,3) NOT NULL DEFAULT 0.500,
+    verification_status ENUM('pending','confirmed','disputed','rejected') NOT NULL DEFAULT 'pending',
+    submitted_by BIGINT UNSIGNED NOT NULL,
+    reviewed_by BIGINT UNSIGNED DEFAULT NULL,
+    reviewed_at DATETIME DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_memory_fact_family (family_id, verification_status, created_at),
+    KEY idx_memory_fact_person (person_id),
+    CONSTRAINT fk_memory_fact_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+    CONSTRAINT fk_memory_fact_person FOREIGN KEY (person_id) REFERENCES family_persons (id) ON DELETE SET NULL,
+    CONSTRAINT fk_memory_fact_submitter FOREIGN KEY (submitted_by) REFERENCES users (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_memory_fact_reviewer FOREIGN KEY (reviewed_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS oral_history_sessions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    family_id BIGINT UNSIGNED NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    topic VARCHAR(120) DEFAULT NULL,
+    interviewer VARCHAR(120) DEFAULT NULL,
+    interviewee_person_id BIGINT UNSIGNED DEFAULT NULL,
+    consent_status ENUM('none','granted','revoked') NOT NULL DEFAULT 'none',
+    consent_at DATETIME DEFAULT NULL,
+    consent_by BIGINT UNSIGNED DEFAULT NULL,
+    audio_file_id BIGINT UNSIGNED DEFAULT NULL,
+    processing_status ENUM('draft','queued','processing','completed','failed') NOT NULL DEFAULT 'draft',
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_oral_session_family (family_id, created_at),
+    CONSTRAINT fk_oral_session_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+    CONSTRAINT fk_oral_session_person FOREIGN KEY (interviewee_person_id) REFERENCES family_persons (id) ON DELETE SET NULL,
+    CONSTRAINT fk_oral_session_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS oral_history_segments (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    session_id BIGINT UNSIGNED NOT NULL,
+    speaker VARCHAR(120) DEFAULT NULL,
+    start_time INT UNSIGNED NOT NULL DEFAULT 0,
+    end_time INT UNSIGNED NOT NULL DEFAULT 0,
+    transcript TEXT NULL,
+    corrected_transcript TEXT NULL,
+    review_status ENUM('pending','confirmed','rejected') NOT NULL DEFAULT 'pending',
+    reviewed_by BIGINT UNSIGNED DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_oral_segment_session (session_id, start_time),
+    CONSTRAINT fk_oral_segment_session FOREIGN KEY (session_id) REFERENCES oral_history_sessions (id) ON DELETE CASCADE,
+    CONSTRAINT fk_oral_segment_reviewer FOREIGN KEY (reviewed_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ai_generation_logs (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    workflow_id BIGINT UNSIGNED NOT NULL,
+    family_id BIGINT UNSIGNED NOT NULL,
+    provider VARCHAR(40) NOT NULL,
+    model VARCHAR(100) NOT NULL DEFAULT '',
+    prompt_version VARCHAR(40) NOT NULL,
+    input_refs JSON NOT NULL,
+    output_version VARCHAR(40) NOT NULL DEFAULT 'v1',
+    review_status ENUM('pending','confirmed','rejected') NOT NULL DEFAULT 'pending',
+    created_by BIGINT UNSIGNED NOT NULL,
+    edited_by BIGINT UNSIGNED DEFAULT NULL,
+    edited_at DATETIME DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_ai_generation_workflow (workflow_id),
+    KEY idx_ai_generation_family (family_id, created_at),
+    CONSTRAINT fk_ai_generation_workflow FOREIGN KEY (workflow_id) REFERENCES ai_workflows (id) ON DELETE CASCADE,
+    CONSTRAINT fk_ai_generation_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+    CONSTRAINT fk_ai_generation_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

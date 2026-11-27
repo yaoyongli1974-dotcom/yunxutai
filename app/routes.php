@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use App\Controllers\AccountController;
+use App\Controllers\AiWorkshopController;
 use App\Controllers\Admin\ClaimController as AdminClaimController;
 use App\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Controllers\Admin\DataRequestController as AdminDataRequestController;
@@ -173,6 +174,18 @@ $router->post('/manage/memorials/{id}/moderation/messages/{messageId}', [ManageM
 $router->post('/manage/memorials/{id}/moderation/tributes/{tributeId}', [ManageModerationController::class, 'tributeStatus'], ['auth']);
 
 // 平台运营后台
+// 阶段 E：AI 家族记忆工坊（新链路，不触碰旧 ai_jobs / ManageAiController）
+$router->get('/families/{id}/ai', [AiWorkshopController::class, 'index'], ['auth']);
+$router->post('/families/{id}/ai/workflows', [AiWorkshopController::class, 'createWorkflow'], ['auth']);
+$router->get('/families/{id}/ai/workflows/{jobId}', [AiWorkshopController::class, 'showWorkflow'], ['auth']);
+$router->post('/families/{id}/ai/workflows/{jobId}/run', [AiWorkshopController::class, 'runWorkflow'], ['auth']);
+$router->post('/families/{id}/ai/workflows/{jobId}/cancel', [AiWorkshopController::class, 'cancelWorkflow'], ['auth']);
+$router->post('/ai/facts/{id}/review', [AiWorkshopController::class, 'reviewFact'], ['auth']);
+$router->post('/families/{id}/ai/oral-sessions', [AiWorkshopController::class, 'createSession'], ['auth']);
+$router->post('/families/{id}/ai/oral-sessions/{sessionId}/consent', [AiWorkshopController::class, 'consent'], ['auth']);
+$router->post('/families/{id}/ai/oral-sessions/{sessionId}/segments', [AiWorkshopController::class, 'addSegment'], ['auth']);
+$router->post('/ai/segments/{id}/review', [AiWorkshopController::class, 'reviewSegment'], ['auth']);
+
 // 阶段 D：数字档案馆（家族资源统一走 ArchiveService + Policy）
 $router->get('/families/{id}/archives', [ArchiveController::class, 'index'], ['auth']);
 $router->get('/families/{id}/archives/new', [ArchiveController::class, 'create'], ['auth']);
