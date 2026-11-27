@@ -120,6 +120,7 @@ final class Policy
         'archive.view' => self::FAMILY_ROLES,
         'archive.upload' => ['owner', 'admin', 'archive_editor'],
         'archive.edit' => ['owner', 'admin', 'archive_editor'],
+        'archive.tag' => ['owner', 'admin', 'archive_editor'],
         'archive.delete.request' => self::FAMILY_ROLES,
         'archive.delete.approve' => ['owner', 'admin'],
         'file.download' => self::FAMILY_ROLES,

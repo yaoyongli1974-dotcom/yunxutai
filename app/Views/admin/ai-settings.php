@@ -164,6 +164,88 @@ $err = static fn (string $key): string => isset($errors[$key]) ? '<p class="fiel
                         <datalist id="ai-video-model-options"></datalist>
                     </fieldset>
 
+                    <fieldset class="field admin-subpanel ai-ocr-group">
+                        <legend class="field__label">文档 OCR Provider（可选）</legend>
+                        <p class="muted small">留空则使用本地草稿模板。启用后任务会携带授权校验过的档案文件调用外部服务：POST {base_url}/ocr，JSON 体含 model / mime_type / file_base64，响应需含 text 字段。密钥仅服务端保存。</p>
+                        <label class="field">
+                            <span class="field__label">启用外部 文档 OCR</span>
+                            <select name="ocr_enabled">
+                                <option value="0" <?= !(bool) ($old['ocr_enabled'] ?? $cfg['ocr_enabled']) ? 'selected' : '' ?>>不启用（本地草稿）</option>
+                                <option value="1" <?= (bool) ($old['ocr_enabled'] ?? $cfg['ocr_enabled']) ? 'selected' : '' ?>>启用外部 Provider</option>
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span class="field__label">Provider 名称</span>
+                            <input type="text" name="ocr_provider" value="<?= e($field('ocr_provider', 'custom')) ?>" maxlength="40" placeholder="custom / baidu / paddleocr">
+                        </label>
+                        <label class="field">
+                            <span class="field__label">Provider 地址（https://ocr.example.com/v1）</span>
+                            <input type="url" name="ocr_base_url" value="<?= e($field('ocr_base_url')) ?>" placeholder="https://ocr.example.com/v1">
+                            <?= $err('ocr_base_url') ?>
+                        </label>
+                        <label class="field">
+                            <span class="field__label">
+                                Provider API Key
+                                <?php if ($cfg['ocr_key_set']): ?>
+                                    <em class="muted small">（已配置 · ****<?= e($cfg['ocr_key_tail']) ?>）</em>
+                                <?php else: ?>
+                                    <em class="muted small">（未配置）</em>
+                                <?php endif; ?>
+                            </span>
+                            <input type="password" name="ocr_api_key" value="" autocomplete="off" placeholder="<?= $cfg['ocr_key_set'] ? '留空则保持现有密钥' : '输入密钥' ?>">
+                            <label class="checkbox-row">
+                                <input type="checkbox" name="ocr_clear_key" value="1">
+                                <span class="muted small">清空此 Provider 密钥</span>
+                            </label>
+                            <?= $err('ocr_api_key') ?>
+                        </label>
+                        <label class="field">
+                            <span class="field__label">模型 / 引擎名</span>
+                            <input type="text" name="ocr_model" value="<?= e($field('ocr_model')) ?>" maxlength="80" placeholder="如 ocr-v1 / whisper-1">
+                            <?= $err('ocr_model') ?>
+                        </label>
+                    </fieldset>
+                    <fieldset class="field admin-subpanel ai-asr-group">
+                        <legend class="field__label">语音转写 Provider（可选）</legend>
+                        <p class="muted small">留空则使用本地草稿模板。启用后任务会携带授权校验过的档案文件调用外部服务：POST {base_url}/transcriptions，JSON 体含 model / mime_type / file_base64，响应需含 text 字段。密钥仅服务端保存。</p>
+                        <label class="field">
+                            <span class="field__label">启用外部 语音转写</span>
+                            <select name="asr_enabled">
+                                <option value="0" <?= !(bool) ($old['asr_enabled'] ?? $cfg['asr_enabled']) ? 'selected' : '' ?>>不启用（本地草稿）</option>
+                                <option value="1" <?= (bool) ($old['asr_enabled'] ?? $cfg['asr_enabled']) ? 'selected' : '' ?>>启用外部 Provider</option>
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span class="field__label">Provider 名称</span>
+                            <input type="text" name="asr_provider" value="<?= e($field('asr_provider', 'custom')) ?>" maxlength="40" placeholder="custom / baidu / paddleocr">
+                        </label>
+                        <label class="field">
+                            <span class="field__label">Provider 地址（https://asr.example.com/v1）</span>
+                            <input type="url" name="asr_base_url" value="<?= e($field('asr_base_url')) ?>" placeholder="https://asr.example.com/v1">
+                            <?= $err('asr_base_url') ?>
+                        </label>
+                        <label class="field">
+                            <span class="field__label">
+                                Provider API Key
+                                <?php if ($cfg['asr_key_set']): ?>
+                                    <em class="muted small">（已配置 · ****<?= e($cfg['asr_key_tail']) ?>）</em>
+                                <?php else: ?>
+                                    <em class="muted small">（未配置）</em>
+                                <?php endif; ?>
+                            </span>
+                            <input type="password" name="asr_api_key" value="" autocomplete="off" placeholder="<?= $cfg['asr_key_set'] ? '留空则保持现有密钥' : '输入密钥' ?>">
+                            <label class="checkbox-row">
+                                <input type="checkbox" name="asr_clear_key" value="1">
+                                <span class="muted small">清空此 Provider 密钥</span>
+                            </label>
+                            <?= $err('asr_api_key') ?>
+                        </label>
+                        <label class="field">
+                            <span class="field__label">模型 / 引擎名</span>
+                            <input type="text" name="asr_model" value="<?= e($field('asr_model')) ?>" maxlength="80" placeholder="如 ocr-v1 / whisper-1">
+                            <?= $err('asr_model') ?>
+                        </label>
+                    </fieldset>
                     <div class="grid-2">
                         <label class="field">
                             <span class="field__label">接口超时（秒，10–600）</span>

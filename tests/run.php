@@ -2896,6 +2896,87 @@ test('阶段 G：API 令牌失效与伪造身份防护', function (): void {
     check((int) Db::value('SELECT owner_user_id FROM families WHERE id = ?', [$familyId]) === (int) $user['id'], 'API 接受了伪造的 user_id');
 });
 
+echo "\n[补齐：外部 Provider / 标注 / 导出 / 机构预留]\n";
+
+test('补齐：OCR/转写 Provider 可由后台配置并生效', function (): void {
+    $client = 'App\\Services\\Ai\\ProcessingClient';
+    check(!$client::enabled('ocr'), '未配置时 OCR 不应启用');
+    \App\Core\Settings::set('ai.ocr.enabled', '1');
+    \App\Core\Settings::set('ai.ocr.provider', 'custom');
+    \App\Core\Settings::set('ai.ocr.base_url', 'https://ocr.example.test/v1');
+    \App\Core\Settings::set('ai.ocr.api_key', 'test-key');
+    \App\Core\Settings::set('ai.ocr.model', 'ocr-v1');
+    check($client::enabled('ocr'), 'OCR 配置未生效');
+    check($client::describe('ocr')['model'] === 'ocr-v1', 'OCR 模型未生效');
+    check($client::label('asr') === '本地演示', '未配置的 ASR 应显示本地演示');
+    \App\Core\Settings::set('ai.ocr.enabled', '0');
+    \App\Core\Settings::set('ai.ocr.api_key', null);
+    check(!$client::enabled('ocr'), '关闭后 OCR 应停用');
+    \App\Core\Settings::reset();
+});
+
+test('补齐：照片区域标注需权限且审核后可确认', function (): void {
+    $owner = make_family_user('tag-owner');
+    $outsider = make_family_user('tag-outsider');
+    $familyId = \App\Services\FamilyService::create($owner, '标注家族', 'tag-' . bin2hex(random_bytes(3)));
+    $personId = \App\Services\FamilyPersonService::create($owner, $familyId, [
+        'name' => '标注人物', 'privacy' => 'private', 'death_date' => '1990-01-01',
+    ]);
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '标注照片', 'privacy' => 'private']);
+    $tmp = sys_get_temp_dir() . '/tag-' . bin2hex(random_bytes(4)) . '.png';
+    file_put_contents($tmp, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', true));
+    login((string) $owner['email'], 'FamilyTest@123');
+    $token = csrf_token('/archives/' . $archiveId);
+    http('POST', '/archives/' . $archiveId . '/files', ['_token' => $token], ['file' => $tmp], false);
+    $fileId = (int) Db::value('SELECT id FROM archive_files WHERE archive_id = ? LIMIT 1', [$archiveId]);
+    check(\App\Services\ArchiveService::addPhotoTag($owner, $fileId, $personId, 10, 20, 30, 40) > 0, '标注创建失败');
+    $tagId = (int) Db::value('SELECT id FROM archive_photo_tags WHERE archive_file_id = ? LIMIT 1', [$fileId]);
+    check((string) Db::value('SELECT review_status FROM archive_photo_tags WHERE id = ?', [$tagId]) === 'pending', 'AI/人工标注不得自动确认');
+    $show = http('GET', '/archives/' . $archiveId);
+    check_contains($show['body'], 'photo-tag-form');
+    \App\Services\ArchiveService::reviewPhotoTag($owner, $tagId, 'confirmed');
+    check((string) Db::value('SELECT review_status FROM archive_photo_tags WHERE id = ?', [$tagId]) === 'confirmed', '审核未生效');
+    try {
+        \App\Services\ArchiveService::addPhotoTag($outsider, $fileId, $personId, 1, 1, 2, 2);
+        check(false, '跨家族标注应被拒绝');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 404, '越权标注应返回 404');
+    }
+    @unlink($tmp);
+});
+
+test('补齐：档案导出仅授权用户可用且写审计', function (): void {
+    $owner = make_family_user('export-owner');
+    $other = make_family_user('export-other');
+    $familyId = \App\Services\FamilyService::create($owner, '导出家族', 'export-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '导出档案', 'privacy' => 'private']);
+    login((string) $owner['email'], 'FamilyTest@123');
+    $res = http('GET', '/archives/' . $archiveId . '/export');
+    check($res['status'] === 200, '授权导出应成功：' . $res['status']);
+    check(str_contains($res['body'], '导出档案'), '导出内容缺少档案标题');
+    check(db_count('audit_logs', "action = 'archive.exported' AND target_id = ?", [$archiveId]) === 1, '导出未写审计');
+    login((string) $other['email'], 'FamilyTest@123');
+    check(http('GET', '/archives/' . $archiveId . '/export')['status'] === 404, '跨家族导出应 404');
+});
+
+test('补齐：机构租户预留仅平台管理员可管理且家族隔离', function (): void {
+    $admin = \App\Core\Db::fetch("SELECT * FROM users WHERE email = 'admin@example.com' LIMIT 1");
+    check(is_array($admin), '测试管理员不存在');
+    $user = make_family_user('institution-user');
+    $institutionId = \App\Services\InstitutionService::create($admin, '示例机构', 'inst-' . bin2hex(random_bytes(3)), ['region' => 'test']);
+    $familyId = \App\Services\FamilyService::create($user, '机构家族', 'inst-family-' . bin2hex(random_bytes(3)));
+    \App\Services\InstitutionService::attachFamily($admin, $institutionId, $familyId);
+    check((int) \App\Services\InstitutionService::institutionOfFamily($familyId)['id'] === $institutionId, '家族未关联机构');
+    check(count(\App\Services\InstitutionService::members($institutionId)) >= 1, '机构成员缺失');
+    try {
+        \App\Services\InstitutionService::attachFamily($user, $institutionId, $familyId);
+        check(false, '普通用户不应能管理机构');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 403, '越权机构操作应 403');
+    }
+    check(db_count('schema_migrations', "version IN ('20261127_025','20261127_026') AND status = 'applied'") === 2, '新增迁移未执行');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

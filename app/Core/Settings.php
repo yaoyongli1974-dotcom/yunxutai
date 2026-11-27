@@ -12,9 +12,9 @@ namespace App\Core;
 final class Settings
 {
     /** @var array<string,string> 支持后台覆盖的 config key 白名单 */
-    private const AI_DOMAIN_FIELDS = ['provider', 'base_url', 'api_key', 'model'];
+    private const AI_DOMAIN_FIELDS = ['enabled', 'provider', 'base_url', 'api_key', 'model'];
     /** 双凭证：主组（provider/base_url/api_key/text_model/image_model）服务文本+图像；视频独立一组，未写=继承主组。 */
-    private const AI_DOMAINS = ['video'];
+    private const AI_DOMAINS = ['video', 'ocr', 'asr'];
     private const AI_MASTER_KEYS = [
         'ai.enabled',
         'ai.provider',

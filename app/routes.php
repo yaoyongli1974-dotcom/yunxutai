@@ -214,6 +214,9 @@ $router->post('/archives/{id}/edit', [ArchiveController::class, 'update'], ['aut
 $router->post('/archives/{id}/files', [ArchiveController::class, 'upload'], ['auth']);
 $router->post('/archives/{id}/tags', [ArchiveController::class, 'addTag'], ['auth']);
 $router->post('/archives/{id}/persons', [ArchiveController::class, 'linkPerson'], ['auth']);
+$router->post('/archives/{id}/files/{fileId}/tags', [ArchiveController::class, 'addPhotoTag'], ['auth']);
+$router->post('/archives/tags/{tagId}/review', [ArchiveController::class, 'reviewPhotoTag'], ['auth']);
+$router->get('/archives/{id}/export', [ArchiveController::class, 'export'], ['auth']);
 $router->post('/archives/{id}/delete-request', [ArchiveController::class, 'requestDelete'], ['auth']);
 $router->post('/archives/{id}/delete-decision', [ArchiveController::class, 'decideDelete'], ['auth']);
 

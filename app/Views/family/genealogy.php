@@ -9,6 +9,23 @@
     <p class="eyebrow">家族谱系</p><h1><?= e($family['name']) ?> · 谱系</h1>
     <?php if ($tree['truncated']): ?><div class="notice-card"><p>人物较多，已按限制截取部分节点，请按人物定位查看局部谱系。</p></div><?php endif; ?>
 
+    <?php $graphData = json_encode([
+        'persons' => $tree['persons'] ?? [],
+        'relations' => $tree['relations'] ?? [],
+    ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>
+    <section class="card">
+        <div class="section-heading section-heading--row">
+            <h2>可交互谱系图</h2>
+            <div class="chip" style="display:flex;gap:0.3rem;">
+                <button type="button" class="button button--small button--ghost" data-graph-action="zoom-in" aria-label="放大">＋</button>
+                <button type="button" class="button button--small button--ghost" data-graph-action="zoom-out" aria-label="缩小">－</button>
+                <button type="button" class="button button--small button--ghost" data-graph-action="reset">重置</button>
+            </div>
+        </div>
+        <div id="genealogy-graph" data-tree="<?= e((string) $graphData) ?>"></div>
+        <p class="muted small">拖动人物调整位置；在空白处拖动平移；滚轮或按钮缩放；触屏可单指拖动。数据按当前人物与层数按需加载。</p>
+    </section>
+
     <section class="card">
         <h2>人物关系图</h2>
         <?php if ($tree['relations'] === []): ?><p class="muted">尚未有已确认的关系。提交关系并经管理员审核后显示在这里。</p><?php endif; ?>
@@ -79,3 +96,4 @@
         </tbody></table>
     </section>
 </div>
+<script src="<?= e(url('assets/js/genealogy.js')) ?>" defer></script>

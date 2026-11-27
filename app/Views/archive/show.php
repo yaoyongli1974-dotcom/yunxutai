@@ -10,12 +10,15 @@
 /** @var bool $canUpload */
 /** @var bool $canDelete */
 /** @var bool $canApprove */
+/** @var bool $canExport */
+/** @var array<int,list<array<string,mixed>>> $photoTags */
 ?>
 <div class="shell" style="padding:2.5rem 0;">
     <p class="eyebrow"><a class="text-link" href="<?= e(url('/families/' . (int) $family['id'] . '/archives')) ?>">数字档案馆</a></p>
     <div class="section-heading section-heading--row">
         <div>
             <h1><?= e($archive['title']) ?></h1>
+            <?php if ($canExport): ?><p><a class="text-link" href="<?= e(url('/archives/' . (int) $archive['id'] . '/export')) ?>">导出档案数据包（JSON）</a></p><?php endif; ?>
             <p class="muted small"><?= e(format_date($archive['event_date'] ?? null)) ?> · <?= e($archive['location'] ?? '') ?> · 可见范围：<?= e($archive['privacy']) ?></p>
         </div>
     </div>
@@ -34,6 +37,35 @@
                     <td><a class="text-link" href="<?= e(url('/archives/files/' . (int) $file['id'] . '/download')) ?>">下载</a></td>
                 </tr>
                 <tr><td colspan="4" class="muted small" style="word-break:break-all;">SHA-256 <?= e($file['sha256']) ?></td></tr>
+                <?php if (str_starts_with((string) $file['mime_type'], 'image/')): ?>
+                    <tr><td colspan="4">
+                        <?php if (($photoTags[(int) $file['id']] ?? []) !== []): ?>
+                            <div class="chip">已标注 <?= count($photoTags[(int) $file['id']]) ?> 处</div>
+                            <?php foreach ($photoTags[(int) $file['id']] as $tag): ?>
+                                <span class="chip"><?= e($tag['person_name']) ?> · <?= e($tag['review_status']) ?></span>
+                                <?php if ($canEdit && $tag['review_status'] === 'pending'): ?>
+                                    <form method="post" action="<?= e(url('/archives/tags/' . (int) $tag['id'] . '/review')) ?>" style="display:inline;">
+                                        <?= csrf_field() ?><input type="hidden" name="archive_id" value="<?= (int) $archive['id'] ?>">
+                                        <button class="button button--small" name="status" value="confirmed" type="submit">确认</button>
+                                        <button class="button button--small button--ghost" name="status" value="rejected" type="submit">驳回</button>
+                                    </form>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                        <img class="photo-tag-preview" src="<?= e(url('/archives/files/' . (int) $file['id'] . '/download')) ?>" alt="标注预览" style="max-width:100%;max-height:260px;display:block;margin:0.5rem 0;">
+                        <?php if ($canEdit): ?>
+                            <form method="post" class="form photo-tag-form" data-photo-tag action="<?= e(url('/archives/' . (int) $archive['id'] . '/files/' . (int) $file['id'] . '/tags')) ?>">
+                                <?= csrf_field() ?>
+                                <label class="field">标注人物
+                                    <select name="person_id"><?php foreach ($allPersons as $person): ?><option value="<?= (int) $person['id'] ?>"><?= e($person['name']) ?></option><?php endforeach; ?></select>
+                                </label>
+                                <input type="hidden" name="x" value="10"><input type="hidden" name="y" value="10">
+                                <input type="hidden" name="width" value="20"><input type="hidden" name="height" value="20">
+                                <button class="button button--small button--ghost" type="submit">添加区域标注（默认左上 20% 区域）</button>
+                            </form>
+                        <?php endif; ?>
+                    </td></tr>
+                <?php endif; ?>
             <?php endforeach; ?>
         </table>
         <?php if ($canUpload): ?>
@@ -116,3 +148,4 @@
         </form>
     <?php endif; ?>
 </div>
+<script src="<?= e(url('assets/js/photo-tags.js')) ?>" defer></script>

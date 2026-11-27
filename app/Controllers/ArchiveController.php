@@ -104,6 +104,14 @@ final class ArchiveController
             'persons' => ArchiveService::linkedPersons((int) $archive['id']),
             'allPersons' => $allPersons,
             'versions' => $canEdit ? ArchiveService::versions(Auth::user(), (int) $archive['id']) : [],
+            'photoTags' => (static function () use ($archive): array {
+                $map = [];
+                foreach (ArchiveService::files((int) $archive['id']) as $file) {
+                    $map[(int) $file['id']] = ArchiveService::photoTags((int) $file['id']);
+                }
+                return $map;
+            })(),
+            'canExport' => Policy::can('data.export', ['family_id' => $familyId], Auth::user()),
             'canEdit' => $canEdit,
             'canUpload' => Policy::can('archive.upload', ['family_id' => $familyId], Auth::user()),
             'canApprove' => Policy::can('archive.delete.approve', ['family_id' => $familyId], Auth::user()),
@@ -195,6 +203,44 @@ final class ArchiveController
             Flash::error($e->getMessage());
         }
         return Response::redirect('/archives/' . (int) $archive['id']);
+    }
+
+    public function addPhotoTag(Request $request, string $id, string $fileId): Response
+    {
+        Csrf::verify($request);
+        try {
+            ArchiveService::addPhotoTag(
+                Auth::user(), (int) $fileId, (int) ($request->post['person_id'] ?? 0),
+                (float) ($request->post['x'] ?? 0), (float) ($request->post['y'] ?? 0),
+                (float) ($request->post['width'] ?? 0), (float) ($request->post['height'] ?? 0)
+            );
+            Flash::success('标注已提交，待管理者确认。');
+        } catch (HttpException $e) {
+            Flash::error($e->getMessage());
+        }
+        return Response::redirect('/archives/' . (int) $id);
+    }
+
+    public function reviewPhotoTag(Request $request, string $tagId): Response
+    {
+        Csrf::verify($request);
+        try {
+            ArchiveService::reviewPhotoTag(Auth::user(), (int) $tagId, (string) ($request->post['status'] ?? ''));
+            Flash::success('标注审核已保存。');
+        } catch (HttpException $e) {
+            Flash::error($e->getMessage());
+        }
+        return Response::redirect('/archives/' . (int) ($request->post['archive_id'] ?? 0));
+    }
+
+    public function export(Request $request, string $id): Response
+    {
+        try {
+            $bundle = ArchiveService::exportBundle(Auth::user(), (int) $id);
+        } catch (HttpException $e) {
+            throw new HttpException($e->getStatusCode(), $e->getMessage());
+        }
+        return Response::json(['data' => $bundle]);
     }
 
     public function requestDelete(Request $request, string $id): Response

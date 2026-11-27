@@ -969,3 +969,65 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
     CONSTRAINT fk_notification_pref_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
+CREATE TABLE IF NOT EXISTS archive_photo_tags (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    family_id BIGINT UNSIGNED NOT NULL,
+    archive_id BIGINT UNSIGNED NOT NULL,
+    archive_file_id BIGINT UNSIGNED NOT NULL,
+    person_id BIGINT UNSIGNED NOT NULL,
+    x DECIMAL(5,2) NOT NULL,
+    y DECIMAL(5,2) NOT NULL,
+    width DECIMAL(5,2) NOT NULL,
+    height DECIMAL(5,2) NOT NULL,
+    tagged_by BIGINT UNSIGNED NOT NULL,
+    review_status ENUM('pending','confirmed','rejected') NOT NULL DEFAULT 'pending',
+    reviewed_by BIGINT UNSIGNED NULL,
+    reviewed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_photo_tags_file (archive_file_id),
+    KEY idx_photo_tags_family (family_id, review_status),
+    CONSTRAINT fk_photo_tags_file FOREIGN KEY (archive_file_id) REFERENCES archive_files (id) ON DELETE CASCADE,
+    CONSTRAINT fk_photo_tags_person FOREIGN KEY (person_id) REFERENCES family_persons (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_photo_tags_tagger FOREIGN KEY (tagged_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS institutions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    name VARCHAR(190) NOT NULL,
+    slug VARCHAR(60) NOT NULL,
+    config_json JSON NULL,
+    status ENUM("active","disabled") NOT NULL DEFAULT "active",
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_institutions_slug (slug),
+    CONSTRAINT fk_institutions_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS institution_members (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    institution_id BIGINT UNSIGNED NOT NULL,
+    user_id BIGINT UNSIGNED NOT NULL,
+    role ENUM("owner","admin","member") NOT NULL DEFAULT "member",
+    status ENUM("active","removed") NOT NULL DEFAULT "active",
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_institution_member (institution_id, user_id),
+    KEY idx_institution_members_user (user_id, status),
+    CONSTRAINT fk_institution_members_institution FOREIGN KEY (institution_id) REFERENCES institutions (id) ON DELETE CASCADE,
+    CONSTRAINT fk_institution_members_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS family_institutions (
+    family_id BIGINT UNSIGNED NOT NULL,
+    institution_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (family_id),
+    KEY idx_family_institutions_institution (institution_id),
+    CONSTRAINT fk_family_institutions_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+    CONSTRAINT fk_family_institutions_institution FOREIGN KEY (institution_id) REFERENCES institutions (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

@@ -303,6 +303,109 @@ final class ArchiveService
         );
     }
 
+    /** 人工照片区域标注：仅图片文件，坐标以百分比存储，标注默认待确认。 */
+    public static function addPhotoTag(?array $user, int $fileId, int $personId, float $x, float $y, float $w, float $h): int
+    {
+        $file = Db::fetch('SELECT * FROM archive_files WHERE id = ? LIMIT 1', [$fileId]);
+        if ($file === null || !str_starts_with((string) $file['mime_type'], 'image/')) {
+            throw new HttpException(422, '只能标注图片文件');
+        }
+        $archive = self::getVisible($user, (int) $file['archive_id']);
+        if ($archive === null) {
+            throw new HttpException(404, '档案不存在或无权访问');
+        }
+        $familyId = (int) $archive['family_id'];
+        Policy::require('archive.tag', ['family_id' => $familyId], $user);
+        if (FamilyPersonService::getVisible($user, $personId) === null) {
+            throw new HttpException(404, '人物不存在或无权访问');
+        }
+        foreach (['x' => $x, 'y' => $y, 'w' => $w, 'h' => $h] as $key => $value) {
+            if ($value < 0 || $value > 100 || ($key !== 'x' && $key !== 'y' && $value <= 0)) {
+                throw new HttpException(422, '标注坐标无效');
+            }
+        }
+        if ($x + $w > 100 || $y + $h > 100) {
+            throw new HttpException(422, '标注区域超出图片范围');
+        }
+        if ($user === null) {
+            throw new HttpException(401, '请先登录');
+        }
+        $id = Db::insert('archive_photo_tags', [
+            'family_id' => $familyId,
+            'archive_id' => (int) $archive['id'],
+            'archive_file_id' => $fileId,
+            'person_id' => $personId,
+            'x' => round($x, 2), 'y' => round($y, 2), 'width' => round($w, 2), 'height' => round($h, 2),
+            'tagged_by' => (int) $user['id'],
+            'review_status' => 'pending',
+        ]);
+        Audit::log('archive.photo_tag.added', 'archive_photo_tag', $id, [
+            'family_id' => $familyId, 'archive_id' => (int) $archive['id'], 'file_id' => $fileId,
+        ], (int) $user['id']);
+        return $id;
+    }
+
+    public static function photoTags(int $fileId): array
+    {
+        return Db::fetchAll(
+            'SELECT t.*, p.name AS person_name FROM archive_photo_tags t
+             INNER JOIN family_persons p ON p.id = t.person_id AND p.deleted_at IS NULL
+             WHERE t.archive_file_id = ? ORDER BY t.id',
+            [$fileId]
+        );
+    }
+
+    public static function reviewPhotoTag(?array $user, int $tagId, string $status): void
+    {
+        if (!in_array($status, ['confirmed', 'rejected'], true)) {
+            throw new HttpException(422, '无效的审核状态');
+        }
+        $tag = Db::fetch('SELECT * FROM archive_photo_tags WHERE id = ? LIMIT 1', [$tagId]);
+        if ($tag === null) {
+            throw new HttpException(404, '标注不存在');
+        }
+        Policy::require('archive.tag', ['family_id' => (int) $tag['family_id']], $user);
+        if ($user === null) {
+            throw new HttpException(401, '请先登录');
+        }
+        Db::update('archive_photo_tags', [
+            'review_status' => $status,
+            'reviewed_by' => (int) $user['id'],
+            'reviewed_at' => date('Y-m-d H:i:s'),
+        ], 'id = ?', [$tagId]);
+        Audit::log('archive.photo_tag.reviewed', 'archive_photo_tag', $tagId, [
+            'family_id' => (int) $tag['family_id'], 'status' => $status,
+        ], (int) $user['id']);
+    }
+
+    /** 导出授权范围内的档案元数据与文件清单（不绕过文件下载鉴权）。 */
+    public static function exportBundle(?array $user, int $archiveId): array
+    {
+        $archive = self::getVisible($user, $archiveId);
+        if ($archive === null) {
+            throw new HttpException(404, '档案不存在或无权访问');
+        }
+        Policy::require('data.export', ['family_id' => (int) $archive['family_id']], $user);
+        if ($user === null) {
+            throw new HttpException(401, '请先登录');
+        }
+        $files = self::files($archiveId);
+        Audit::log('archive.exported', 'archive', $archiveId, [
+            'family_id' => (int) $archive['family_id'], 'files' => count($files),
+        ], (int) $user['id']);
+        return [
+            'archive' => $archive,
+            'files' => array_map(static fn (array $f): array => [
+                'id' => (int) $f['id'], 'original_filename' => $f['original_filename'],
+                'mime_type' => $f['mime_type'], 'sha256' => $f['sha256'], 'file_size' => (int) $f['file_size'],
+            ], $files),
+            'tags' => self::tags($archiveId),
+            'persons' => self::linkedPersons($archiveId),
+            'versions' => self::versions($user, $archiveId),
+            'exported_at' => date('c'),
+        ];
+    }
+
     public static function versions(?array $user, int $archiveId): array
     {
         $archive = self::getVisible($user, $archiveId);

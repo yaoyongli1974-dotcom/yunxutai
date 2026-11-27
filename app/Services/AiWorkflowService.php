@@ -8,6 +8,7 @@ use App\Core\Db;
 use App\Core\HttpException;
 use App\Core\Policy;
 use App\Services\Ai\AiClientFactory;
+use App\Services\Ai\ProcessingClient;
 use RuntimeException;
 use Throwable;
 
@@ -474,6 +475,23 @@ final class AiWorkflowService
     private static function run(string $type, array $input): array
     {
         $text = trim((string) ($input['text'] ?? ''));
+        $processingProvider = null;
+        if (($type === 'ocr_document' || $type === 'transcribe_audio') && !empty($input['file_id'])) {
+            // 输入资料在创建任务时已通过 assertInputAuthorized 校验；worker 侧不再做用户级授权。
+            $file = \App\Core\Db::fetch('SELECT * FROM archive_files WHERE id = ? LIMIT 1', [(int) $input['file_id']]);
+            if ($file === null) {
+                throw new HttpException(404, '待处理文件不存在');
+            }
+            $kind = $type === 'ocr_document' ? 'ocr' : 'asr';
+            if (ProcessingClient::enabled($kind)) {
+                $path = ArchiveService::absolutePath($file);
+                if ($path === null) {
+                    throw new HttpException(422, '待处理文件不可访问');
+                }
+                $text = ProcessingClient::recognize($kind, $path, (string) $file['mime_type'], (string) ($input['prompt'] ?? ''));
+                $processingProvider = ProcessingClient::describe($kind);
+            }
+        }
         if ($text === '' && in_array($type, ['extract_facts', 'biography_draft', 'family_history_draft'], true)) {
             throw new HttpException(422, '缺少待整理的文字资料');
         }
@@ -508,6 +526,7 @@ final class AiWorkflowService
             'content' => mb_substr($content, 0, 20000),
             'facts' => $facts,
             'note' => 'AI 输出仅为草稿/候选，未经人工审核不得作为正式事实。',
+            'processing_provider' => $processingProvider,
             'generated_at' => date('c'),
         ];
     }

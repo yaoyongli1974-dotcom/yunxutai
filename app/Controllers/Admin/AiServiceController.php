@@ -251,6 +251,51 @@ final class AiServiceController
             }
         }
 
+        // —— OCR / 语音转写独立组：可配置为任意兼容 HTTP Provider ——
+        $processingChanged = false;
+        foreach (['ocr', 'asr'] as $kind) {
+            $enabled = (bool) ($post[$kind . '_enabled'] ?? false);
+            $baseUrl = rtrim(trim((string) ($post[$kind . '_base_url'] ?? '')), '/');
+            $apiKey = trim((string) ($post[$kind . '_api_key'] ?? ''));
+            $model = trim((string) ($post[$kind . '_model'] ?? ''));
+            $provider = trim((string) ($post[$kind . '_provider'] ?? ''));
+            $clear = (bool) ($post[$kind . '_clear_key'] ?? false);
+            if ($enabled && $baseUrl !== '' && filter_var($baseUrl, FILTER_VALIDATE_URL) === false) {
+                $errors[$kind . '_base_url'] = 'Provider 地址必须是合法 URL';
+            }
+            if (mb_strlen($model) > 80) {
+                $errors[$kind . '_model'] = '模型名不能超过 80 字符';
+            }
+            if ($enabled && $clear) {
+                $errors[$kind . '_base_url'] = '启用状态下不能同时清空密钥';
+            }
+        }
+        if ($errors !== []) {
+            return View::render('admin/ai-settings', array_merge($this->settingsViewData(), [
+                'errors' => $errors,
+                'old' => $post,
+            ]), 'layout', 422);
+        }
+        foreach (['ocr', 'asr'] as $kind) {
+            Settings::set('ai.' . $kind . '.enabled', (bool) ($post[$kind . '_enabled'] ?? false) ? '1' : '0');
+            Settings::set('ai.' . $kind . '.provider', trim((string) ($post[$kind . '_provider'] ?? '')) ?: 'custom');
+            $baseUrl = rtrim(trim((string) ($post[$kind . '_base_url'] ?? '')), '/');
+            if ($baseUrl !== '') {
+                Settings::set('ai.' . $kind . '.base_url', $baseUrl);
+            }
+            $model = trim((string) ($post[$kind . '_model'] ?? ''));
+            if ($model !== '') {
+                Settings::set('ai.' . $kind . '.model', $model);
+            }
+            if ((bool) ($post[$kind . '_clear_key'] ?? false)) {
+                Settings::set('ai.' . $kind . '.api_key', null);
+                $processingChanged = true;
+            } elseif (trim((string) ($post[$kind . '_api_key'] ?? '')) !== '') {
+                Settings::set('ai.' . $kind . '.api_key', trim((string) $post[$kind . '_api_key']));
+                $processingChanged = true;
+            }
+        }
+
         Audit::log('admin.ai_settings_updated', 'platform_settings', null, [
             'provider' => $provider,
             'enabled' => $enabled,
@@ -258,6 +303,7 @@ final class AiServiceController
             'charging' => $charging,
             'daily_limit' => $dailyLimit,
             'api_key_changed' => $apiKey !== '' || $clearKey,
+            'processing_group_changed' => $processingChanged,
             'video_group_changed' => $videoClear
                 || $apiKey !== ''
                 || $videoProvider !== ''
@@ -303,6 +349,18 @@ final class AiServiceController
                 'video_key_set' => trim((string) config('ai.video.api_key', '')) !== '' || trim((string) config('ai.api_key', '')) !== '',
                 'video_key_tail' => $videoKeyRaw !== '' ? mb_substr($videoKeyRaw, -4) : '',
                 'video_key_from' => Settings::get('ai.video.api_key') !== null ? '设置·视频' : (Settings::get('ai.api_key') !== null ? '主组' : '环境变量'),
+                'ocr_enabled' => (bool) config('ai.ocr.enabled', false),
+                'ocr_provider' => (string) config('ai.ocr.provider', 'custom'),
+                'ocr_base_url' => (string) config('ai.ocr.base_url', ''),
+                'ocr_model' => (string) config('ai.ocr.model', ''),
+                'ocr_key_set' => trim((string) config('ai.ocr.api_key', '')) !== '',
+                'ocr_key_tail' => mb_substr(trim((string) config('ai.ocr.api_key', '')), -4),
+                'asr_enabled' => (bool) config('ai.asr.enabled', false),
+                'asr_provider' => (string) config('ai.asr.provider', 'custom'),
+                'asr_base_url' => (string) config('ai.asr.base_url', ''),
+                'asr_model' => (string) config('ai.asr.model', ''),
+                'asr_key_set' => trim((string) config('ai.asr.api_key', '')) !== '',
+                'asr_key_tail' => mb_substr(trim((string) config('ai.asr.api_key', '')), -4),
             ],
             'jobsTotal' => AiJob::count(),
             'jobsFailed' => AiJob::count('failed'),

@@ -86,3 +86,34 @@ doctor 的 4 条环境警告与基线一致（APP_DEBUG、APP_ENV、upload_max_f
 - 谱系为列表式按需加载，尚无拖动缩放图谱；照片区域人物标注、档案导出、机构租户未实现；
 - GitHub Actions CI 未配置；生产 `php.ini` 上传限制与 APP_DEBUG/APP_ENV 需整改；
 - 小程序页面仅覆盖核心浏览与创建流程，复杂档案整理和展馆编辑仍建议在 Web 端完成。
+
+## 10. 未决项补齐（用户追加指令后完成）
+
+用户指令：「1、先解决未解决的问题，外部接入可通过管理后台进行操作，其他的按需求完成」。以下在同一本地提交中完成，仍未推 main、未碰生产库。
+
+### 外部 OCR / 语音转写 Provider
+- 新增 `app/Services/Ai/ProcessingClient.php`：统一 Provider 适配，POST `{base_url}/ocr` 与 `/transcriptions`，Bearer 鉴权，兼容 `text` / `result` / `data.text` / `choices[0].message.content` 响应；未配置时不发起外部请求。
+- `AiWorkflowService` 的 `ocr_document` / `transcribe_audio` 在配置了 Provider 且任务输入含合法 `file_id` 时调用识别，输出保留 `processing_provider`；输入授权仍先经 `assertInputAuthorized` 校验。
+- 管理后台 `app/Views/admin/ai-settings.php` 增加 OCR/ASR 两组配置；`AiServiceController` 保存与回填 `ocr_*` / `asr_*` 白名单字段；API Key 支持清空。
+- `Settings` 白名单增加 `ai.ocr.*` / `ai.asr.*`（含 `enabled`）。
+
+### 可交互谱系
+- 新增 `public/assets/js/genealogy.js`：SVG 节点/连线、拖动节点、平移、滚轮与按钮缩放、触摸拖动，无第三方依赖；服务端仍按 `center_id` + `depth` 裁剪，保持按需加载。
+
+### 照片区域标注与导出
+- 迁移 `20261127_025_create_archive_photo_tags`：百分比坐标、标注人、待确认状态、审核人与时间；同步 `schema.sql`。
+- `ArchiveService` 新增 `addPhotoTag` / `photoTags` / `reviewPhotoTag` / `exportBundle`；Policy 新增 `archive.tag` 能力；Web 增加标注提交/审核与图片拖动选区脚本 `public/assets/js/photo-tags.js`，导出为授权范围内的 JSON 数据包并写审计。全程人工标注，不做自动人脸识别。
+
+### 机构租户预留
+- 迁移 `20261127_026_create_institutions`：`institutions` / `institution_members` / `family_institutions`，家族与机构显式关联，不修改现有 `families` 表；同步 `schema.sql`。
+- `InstitutionService`：仅平台管理员可创建机构、任免角色、关联家族，全部写审计；普通用户越权返回 403。
+
+### CI
+- 新增 `.github/workflows/ci.yml`：PHP 8.4 + MySQL 8 service；PHP 全量 lint、小程序 JS 语法检查、`bin/test.sh` 全量集成测试、`bin/migrate-v2.php --status`、生产式上传限制的 doctor。
+
+### 验证更新
+- `bash bin/test.sh`：**109 通过 / 0 失败**（新增 4 项：Provider 配置、标注权限与审核、导出审计、机构隔离）。
+- 全量 PHP lint 0 错误；小程序与新增 JS 的 `node --check` 全部通过；doctor 0 阻断；26 个迁移在测试库全部 applied。
+
+### 仍未完成（需生产授权）
+- 上述迁移未在生产库执行；外部 Provider 凭据需管理员在后台填入；生产部署、CI 首次运行验证与回滚演练仍需用户授权。
