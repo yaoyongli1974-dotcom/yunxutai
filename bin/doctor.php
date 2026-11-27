@@ -245,6 +245,44 @@ if ($redisUrl !== '') {
     }
 }
 
+// 运行健康指标（L-02，不输出任何敏感配置）
+$uploadDir = BASE_PATH . '/storage/uploads';
+if (is_dir($uploadDir) && is_writable($uploadDir)) {
+    ok('上传目录可写');
+} else {
+    fail('上传目录不可写：' . $uploadDir);
+}
+$free = @disk_free_space(BASE_PATH);
+if ($free !== false) {
+    $gb = round($free / 1073741824, 2);
+    if ($gb < 2) {
+        warn('磁盘剩余空间不足 2GB（当前 ' . $gb . 'GB）');
+    } else {
+        ok('磁盘剩余空间 ' . $gb . 'GB');
+    }
+}
+try {
+    $pending = (int) Db::value("SELECT COUNT(*) FROM ai_workflows WHERE status = 'queued'");
+    $failing = (int) Db::value("SELECT COUNT(*) FROM ai_workflows WHERE status IN ('failed','processing')");
+    ok('AI 队列：待处理 ' . $pending . '，失败/处理中 ' . $failing);
+    if ($failing > 0) {
+        warn('存在未完成的 AI 工作流，请检查 Worker 租约');
+    }
+} catch (Throwable $e) {
+    warn('AI 队列状态不可读：' . mb_substr($e->getMessage(), 0, 80));
+}
+if (is_dir(BASE_PATH . '/storage/backups')) {
+    ok('备份目录存在');
+} else {
+    warn('备份目录不存在，请配置 bin/backup.php');
+}
+$workerLog = BASE_PATH . '/storage/logs/ai-workflow-worker.log';
+if (is_file($workerLog)) {
+    ok('AI Worker 日志存在（mtime ' . date('Y-m-d H:i', (int) filemtime($workerLog)) . '）');
+} else {
+    warn('尚无 AI Worker 日志，Worker 可能未运行');
+}
+
 echo "\n通过：" . count($oks) . "\n";
 foreach ($oks as $item) {
     echo "  ✓ {$item}\n";

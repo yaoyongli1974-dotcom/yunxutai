@@ -3316,6 +3316,33 @@ test('Round2 I：机构事务一致性、最后 owner 与重复归属', function
     }
 });
 
+echo "\n[Round2 Phase 5：事务一致性]\n";
+
+test('Round2 J：档案版本事务与删除状态机', function (): void {
+    $owner = make_family_user('p5-archive');
+    $familyId = \App\Services\FamilyService::create($owner, '一致性家族', 'p5-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '原始标题', 'privacy' => 'private']);
+    \App\Services\ArchiveService::update($owner, $id, ['title' => '第一次修改', 'change_note' => 'v1']);
+    \App\Services\ArchiveService::update($owner, $id, ['title' => '第二次修改', 'change_note' => 'v2']);
+    check(db_count('archive_versions', 'archive_id = ?', [$id]) === 2, '版本快照数量应为 2');
+    check((int) Db::value('SELECT MAX(version) FROM archive_versions WHERE archive_id = ?', [$id]) === 2, '版本号应连续');
+    \App\Services\ArchiveService::requestDelete($owner, $id);
+    try {
+        \App\Services\ArchiveService::requestDelete($owner, $id);
+        check(false, '重复删除申请应被拒绝');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 409, '重复申请应 409');
+    }
+    \App\Services\ArchiveService::approveDelete($owner, $id, true);
+    check((string) Db::value('SELECT status FROM archives WHERE id = ?', [$id]) === 'deleted', '删除审批应生效');
+    try {
+        \App\Services\ArchiveService::approveDelete($owner, $id, true);
+        check(false, '重复审批应被拒绝');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 404, '已处理申请应 404');
+    }
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

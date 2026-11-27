@@ -8,9 +8,21 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.4'
+            database: mysql:8.4
+          - php: '8.5'
+            database: mysql:8.4
+          - php: '8.4'
+            database: mariadb:11
+          - php: '8.5'
+            database: mariadb:11
     services:
       mysql:
-        image: mysql:8.0
+        image: ${{ matrix.database }}
         env:
           MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
           MYSQL_DATABASE: jidian_test
@@ -36,7 +48,7 @@ jobs:
 
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: ${{ matrix.php }}
           extensions: pdo_mysql, mbstring, gd, curl, zip
           coverage: none
           tools: composer:v2
@@ -60,5 +72,13 @@ jobs:
       - name: Migration status
         run: php bin/migrate-v2.php --status
 
+      - name: Migration repeatability
+        run: php bin/migrate-v2.php >/dev/null && php bin/migrate-v2.php --status
+
       - name: Doctor (production-like upload limits)
         run: php -d upload_max_filesize=20M -d post_max_size=25M bin/doctor.php
+
+      - name: Secret scan (no credentials in tracked source)
+        run: |
+          ! git grep -nEi '(ghp_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16}|sk-[A-Za-z0-9]{20,})' -- ':!.env.example'
+          ! git grep -nE 'APP_KEY=.*[A-Za-z0-9]{32,}' -- .env.example

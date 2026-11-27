@@ -147,24 +147,29 @@ final class ArchiveService
             throw new HttpException(404, '档案不存在');
         }
         Policy::require('archive.edit', self::context((int) $archive['family_id']), $user);
+        if (in_array((string) $archive['status'], ['deleted', 'delete_requested'], true)) {
+            throw new HttpException(422, '当前状态不可编辑');
+        }
         $fields = self::normalize($data, false);
-        $nextVersion = (int) Db::value(
-            'SELECT COALESCE(MAX(version), 0) + 1 FROM archive_versions WHERE archive_id = ?',
-            [$archiveId]
-        );
-        // 修改前先保存快照：档案原始信息与文件记录均不会被覆盖。
-        Db::insert('archive_versions', [
-            'archive_id' => $archiveId,
-            'version' => $nextVersion,
-            'title' => (string) $archive['title'],
-            'description' => $archive['description'],
-            'privacy' => (string) $archive['privacy'],
-            'status' => (string) $archive['status'],
-            'change_note' => mb_substr(trim((string) ($data['change_note'] ?? '')), 0, 255) ?: null,
-            'created_by' => (int) ($user['id'] ?? 0),
-        ]);
-        Db::update('archives', $fields, 'id = ?', [$archiveId]);
-        Audit::log('archive.update', 'archive', $archiveId, ['family_id' => (int) $archive['family_id'], 'version' => $nextVersion]);
+        Db::transaction(function () use ($user, $archive, $archiveId, $data, $fields): void {
+            Db::fetchAll('SELECT id FROM archives WHERE id = ? FOR UPDATE', [$archiveId]);
+            $nextVersion = (int) Db::value(
+                'SELECT COALESCE(MAX(version), 0) + 1 FROM archive_versions WHERE archive_id = ?',
+                [$archiveId]
+            );
+            Db::insert('archive_versions', [
+                'archive_id' => $archiveId,
+                'version' => $nextVersion,
+                'title' => (string) $archive['title'],
+                'description' => $archive['description'],
+                'privacy' => (string) $archive['privacy'],
+                'status' => (string) $archive['status'],
+                'change_note' => mb_substr(trim((string) ($data['change_note'] ?? '')), 0, 255) ?: null,
+                'created_by' => (int) ($user['id'] ?? 0),
+            ]);
+            Db::update('archives', $fields, 'id = ?', [$archiveId]);
+            Audit::log('archive.update', 'archive', $archiveId, ['family_id' => (int) $archive['family_id'], 'version' => $nextVersion]);
+        });
     }
 
     /** @return array{disk_path:string, original_name:string, mime:string, size_bytes:int, sha256:string, kind:string} */
@@ -176,20 +181,31 @@ final class ArchiveService
         }
         Policy::require('archive.upload', self::context((int) $archive['family_id']), $user);
         $stored = Storage::storeArchiveUpload($upload);
-        $fileId = Db::insert('archive_files', [
-            'archive_id' => $archiveId,
-            'storage_key' => $stored['disk_path'],
-            'original_filename' => $stored['original_name'],
-            'mime_type' => $stored['mime'],
-            'file_size' => $stored['size_bytes'],
-            'sha256' => $stored['sha256'],
-            'file_role' => 'original',
-            'processing_status' => 'ready',
-        ]);
-        Audit::log('archive.file.upload', 'archive_file', $fileId, [
-            'archive_id' => $archiveId,
-            'sha256' => $stored['sha256'],
-        ]);
+        try {
+            $fileId = Db::transaction(function () use ($stored, $archiveId, $user): int {
+                $id = Db::insert('archive_files', [
+                    'archive_id' => $archiveId,
+                    'storage_key' => $stored['disk_path'],
+                    'original_filename' => $stored['original_name'],
+                    'mime_type' => $stored['mime'],
+                    'file_size' => $stored['size_bytes'],
+                    'sha256' => $stored['sha256'],
+                    'file_role' => 'original',
+                    'processing_status' => 'ready',
+                ]);
+                Audit::log('archive.file.upload', 'archive_file', $id, [
+                    'archive_id' => $archiveId, 'sha256' => $stored['sha256'],
+                ], $user === null ? 0 : (int) $user['id']);
+                return $id;
+            });
+        } catch (Throwable $e) {
+            // 文件系统无法与 MySQL 共享事务：失败时补偿删除已落盘文件。
+            $path = Storage::absolute((string) $stored['disk_path']);
+            if ($path !== null && is_file($path)) {
+                @unlink($path);
+            }
+            throw $e;
+        }
         return $stored + ['id' => $fileId];
     }
 
@@ -421,12 +437,21 @@ final class ArchiveService
 
     public static function requestDelete(?array $user, int $archiveId): void
     {
+        if ((string) Db::value('SELECT status FROM archives WHERE id = ? LIMIT 1', [$archiveId]) === 'delete_requested') {
+            throw new HttpException(409, '删除申请待处理中');
+        }
         $archive = self::getVisible($user, $archiveId);
         if ($archive === null) {
             throw new HttpException(404, '档案不存在');
         }
         Policy::require('archive.delete.request', self::context((int) $archive['family_id']), $user);
-        Db::update('archives', ['status' => 'delete_requested'], 'id = ?', [$archiveId]);
+        $changed = Db::update(
+            'archives', ['status' => 'delete_requested'],
+            "id = ? AND status IN ('active','archived')", [$archiveId]
+        );
+        if ($changed < 1) {
+            throw new HttpException(409, '当前状态不可申请删除');
+        }
         Audit::log('archive.delete.request', 'archive', $archiveId, ['family_id' => (int) $archive['family_id']]);
     }
 
@@ -437,12 +462,24 @@ final class ArchiveService
             throw new HttpException(404, '没有待处理的删除申请');
         }
         Policy::require('archive.delete.approve', self::context((int) $archive['family_id']), $user);
-        if ($approve) {
-            // 软删除：记录与原始文件均保留，便于回滚与审计。
-            Db::update('archives', ['status' => 'deleted', 'deleted_at' => date('Y-m-d H:i:s')], 'id = ?', [$archiveId]);
-        } else {
-            Db::update('archives', ['status' => 'active'], 'id = ?', [$archiveId]);
+        $status = $approve ? 'deleted' : 'active';
+        $fields = $approve
+            ? ['status' => 'deleted', 'deleted_at' => date('Y-m-d H:i:s')]
+            : ['status' => 'active', 'deleted_at' => null];
+        $changed = Db::transaction(function () use ($fields, $status, $archive, $archiveId, $user, $approve): int {
+            $n = Db::update(
+                'archives', $fields,
+                "id = ? AND status = 'delete_requested'", [$archiveId]
+            );
+            if ($n > 0) {
+                Audit::log($approve ? 'archive.delete.approve' : 'archive.delete.reject', 'archive', $archiveId, [
+                    'family_id' => (int) $archive['family_id'], 'to' => $status,
+                ], $user === null ? 0 : (int) $user['id']);
+            }
+            return $n;
+        });
+        if ($changed < 1) {
+            throw new HttpException(409, '删除申请已被处理');
         }
-        Audit::log($approve ? 'archive.delete.approve' : 'archive.delete.reject', 'archive', $archiveId);
     }
 }
