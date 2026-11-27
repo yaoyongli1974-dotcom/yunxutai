@@ -5,10 +5,16 @@ namespace App\Core;
 
 final class Audit
 {
-    public static function log(string $action, ?string $targetType = null, ?int $targetId = null, array $meta = []): void
+    public static function log(
+        string $action,
+        ?string $targetType = null,
+        ?int $targetId = null,
+        array $meta = [],
+        ?int $actorId = null
+    ): void
     {
         try {
-            $actorId = isset($_SESSION['uid']) && is_numeric($_SESSION['uid']) ? (int) $_SESSION['uid'] : null;
+            $actorId ??= isset($_SESSION['uid']) && is_numeric($_SESSION['uid']) ? (int) $_SESSION['uid'] : null;
             Db::insert('audit_logs', [
                 'actor_user_id' => $actorId,
                 'action' => $action,

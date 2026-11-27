@@ -428,3 +428,126 @@ CREATE TABLE IF NOT EXISTS site_settings (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (setting_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 云叙台 2.0 新增表（与 database/migrations/20261127_*.php 完全一致，禁止单边修改）
+-- ============================================================
+
+-- 20261127_001 create_schema_migrations
+CREATE TABLE IF NOT EXISTS schema_migrations (
+            version VARCHAR(40) NOT NULL,
+            name VARCHAR(120) NOT NULL,
+            checksum CHAR(64) NOT NULL,
+            executed_at DATETIME DEFAULT NULL,
+            status ENUM('applied','failed') NOT NULL DEFAULT 'failed',
+            error TEXT DEFAULT NULL,
+            PRIMARY KEY (version)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_002 create_families
+CREATE TABLE IF NOT EXISTS families (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            name VARCHAR(190) NOT NULL,
+            slug VARCHAR(190) NOT NULL,
+            surname VARCHAR(50) DEFAULT NULL,
+            description TEXT DEFAULT NULL,
+            avatar_file_id BIGINT UNSIGNED DEFAULT NULL,
+            origin_place VARCHAR(190) DEFAULT NULL,
+            privacy ENUM('private','unlisted','public') NOT NULL DEFAULT 'private',
+            owner_user_id BIGINT UNSIGNED NOT NULL,
+            status ENUM('active','suspended','archived') NOT NULL DEFAULT 'active',
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_family_slug (slug),
+            KEY idx_family_owner (owner_user_id),
+            KEY idx_family_status (status),
+            CONSTRAINT fk_families_owner FOREIGN KEY (owner_user_id) REFERENCES users (id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_003 create_family_members
+CREATE TABLE IF NOT EXISTS family_members (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            family_id BIGINT UNSIGNED NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            role ENUM('owner','admin','genealogy_editor','archive_editor','member','guest') NOT NULL DEFAULT 'member',
+            status ENUM('invited','active','left','banned') NOT NULL DEFAULT 'invited',
+            joined_at DATETIME DEFAULT NULL,
+            invited_by BIGINT UNSIGNED DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_family_user (family_id, user_id),
+            KEY idx_family_member_user (user_id, status),
+            CONSTRAINT fk_family_members_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+            CONSTRAINT fk_family_members_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+            CONSTRAINT fk_family_members_inviter FOREIGN KEY (invited_by) REFERENCES users (id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_004 create_family_invitations
+CREATE TABLE IF NOT EXISTS family_invitations (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            family_id BIGINT UNSIGNED NOT NULL,
+            email VARCHAR(190) NOT NULL,
+            role ENUM('admin','genealogy_editor','archive_editor','member','guest') NOT NULL DEFAULT 'member',
+            token_hash CHAR(64) NOT NULL,
+            status ENUM('pending','accepted','revoked','expired') NOT NULL DEFAULT 'pending',
+            expires_at DATETIME NOT NULL,
+            invited_by BIGINT UNSIGNED NOT NULL,
+            accepted_by BIGINT UNSIGNED DEFAULT NULL,
+            accepted_at DATETIME DEFAULT NULL,
+            revoked_at DATETIME DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_invite_token (token_hash),
+            KEY idx_invite_family (family_id, status),
+            CONSTRAINT fk_invitations_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+            CONSTRAINT fk_invitations_inviter FOREIGN KEY (invited_by) REFERENCES users (id) ON DELETE CASCADE,
+            CONSTRAINT fk_invitations_acceptor FOREIGN KEY (accepted_by) REFERENCES users (id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_005 create_family_persons
+CREATE TABLE IF NOT EXISTS family_persons (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            family_id BIGINT UNSIGNED NOT NULL,
+            name VARCHAR(190) NOT NULL,
+            gender ENUM('unknown','male','female','other') NOT NULL DEFAULT 'unknown',
+            birth_date DATE DEFAULT NULL,
+            death_date DATE DEFAULT NULL,
+            birth_place VARCHAR(190) DEFAULT NULL,
+            death_place VARCHAR(190) DEFAULT NULL,
+            biography TEXT DEFAULT NULL,
+            avatar_file_id BIGINT UNSIGNED DEFAULT NULL,
+            privacy ENUM('private','family','public') NOT NULL DEFAULT 'private',
+            verification_status ENUM('none','pending','verified','disputed') NOT NULL DEFAULT 'none',
+            is_deceased TINYINT(1) NOT NULL DEFAULT 0,
+            created_by BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            deleted_at DATETIME DEFAULT NULL,
+            PRIMARY KEY (id),
+            KEY idx_person_family_name (family_id, name),
+            KEY idx_person_dates (birth_date, death_date),
+            CONSTRAINT fk_persons_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+            CONSTRAINT fk_persons_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20261127_006 create_person_memorial_links
+CREATE TABLE IF NOT EXISTS person_memorial_links (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            family_id BIGINT UNSIGNED NOT NULL,
+            person_id BIGINT UNSIGNED NOT NULL,
+            memorial_id BIGINT UNSIGNED NOT NULL,
+            relation_note VARCHAR(255) DEFAULT NULL,
+            created_by BIGINT UNSIGNED NOT NULL,
+            status ENUM('active','revoked') NOT NULL DEFAULT 'active',
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_person_memorial (person_id, memorial_id),
+            KEY idx_memorial_person (memorial_id),
+            KEY idx_links_family (family_id),
+            CONSTRAINT fk_links_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+            CONSTRAINT fk_links_person FOREIGN KEY (person_id) REFERENCES family_persons (id) ON DELETE CASCADE,
+            CONSTRAINT fk_links_memorial FOREIGN KEY (memorial_id) REFERENCES memorials (id) ON DELETE RESTRICT,
+            CONSTRAINT fk_links_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

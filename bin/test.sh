@@ -21,6 +21,11 @@ export FFMPEG_BIN=/usr/bin/ffmpeg
 echo "== 准备测试数据库 ${DB_NAME} =="
 php bin/install.php --fresh --demo
 
+echo "== 执行 2.0 增量迁移（含重复执行验证） =="
+DB_DATABASE="$DB_NAME" php bin/migrate-v2.php > storage/logs/test-migrate.log
+DB_DATABASE="$DB_NAME" php bin/migrate-v2.php > storage/logs/test-migrate-rerun.log
+
+
 echo "== 启动测试服务器 ${BASE_URL} =="
 php -S "127.0.0.1:${PORT}" -t public > storage/logs/test-server.log 2>&1 &
 SERVER_PID=$!

@@ -2132,6 +2132,156 @@ test('AI 收费订单（收款确认制）', function (): void {
 });
 
 
+
+echo "\n[阶段 B：家族基础服务与权限隔离]\n";
+
+/** 预期的 HttpException 断言 */
+function expect_http_error(callable $fn, int $status, string $message): void
+{
+    try {
+        $fn();
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === $status, $message . '（实际状态码 ' . $e->getStatusCode() . '）');
+        return;
+    }
+    throw new RuntimeException($message . '（未抛出异常）');
+}
+
+/** 创建测试用户并返回完整用户数组 */
+function make_family_user(string $label): array
+{
+    $email = 'fam-' . $label . '-' . bin2hex(random_bytes(4)) . '@example.test';
+    $id = \App\Models\User::create($email, 'FamilyTest@123', '家族测试 ' . $label);
+    $user = \App\Models\User::find($id);
+    check(is_array($user), '测试用户创建失败');
+    return $user;
+}
+
+test('2.0 迁移版本记录完整且可重复执行', function (): void {
+    check(db_count('schema_migrations') === 6, '应记录 6 个 2.0 迁移版本');
+    check(db_count('schema_migrations', "status = 'applied'") === 6, '所有迁移应为 applied');
+    $checksums = \App\Core\Db::fetchAll('SELECT version, checksum FROM schema_migrations');
+    foreach ($checksums as $row) {
+        check((string) $row['checksum'] !== '', '迁移 checksum 不应为空');
+    }
+    foreach (['families', 'family_members', 'family_invitations', 'family_persons', 'person_memorial_links'] as $table) {
+        check(
+            (int) \App\Core\Db::value('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?', [$table]) > 0,
+            '缺少 2.0 表 ' . $table
+        );
+    }
+});
+
+test('创建家族时 owner 自动成为 active 成员并写审计', function (): void {
+    $owner = make_family_user('owner');
+    $slug = 'fam-' . bin2hex(random_bytes(4));
+    $familyId = \App\Services\FamilyService::create($owner, '测试家族', $slug);
+    check($familyId > 0, '家族创建失败');
+    check((string) \App\Core\Db::value('SELECT slug FROM families WHERE id = ?', [$familyId]) === $slug, 'slug 未保存');
+    check(db_count('family_members', 'family_id = ? AND user_id = ? AND role = ? AND status = ?',
+        [$familyId, $owner['id'], 'owner', 'active']) === 1, 'owner 成员记录缺失');
+    check(db_count('audit_logs', "action = 'family.create' AND target_type = 'family' AND target_id = ?", [$familyId]) === 1,
+        '家族创建未写审计');
+    check(\App\Core\Policy::familyRole($familyId, (int) $owner['id']) === 'owner', 'Policy 未识别 owner');
+});
+
+test('邀请令牌：错邮箱/撤销/重放均失效，接受后角色生效', function (): void {
+    $owner = make_family_user('invite-owner');
+    $invitee = make_family_user('invitee');
+    $outsider = make_family_user('outsider');
+    $familyId = \App\Services\FamilyService::create($owner, '邀请测试家族', 'invite-' . bin2hex(random_bytes(4)), ['privacy' => 'public']);
+
+    $invite = \App\Services\FamilyService::invite($owner, $familyId, (string) $invitee['email'], 'member');
+    check($invite['token'] !== '', '邀请令牌为空');
+    check(db_count('family_invitations', 'family_id = ? AND status = ?', [$familyId, 'pending']) === 1, '邀请未入库');
+    check((string) \App\Core\Db::value('SELECT token_hash FROM family_invitations WHERE family_id = ?', [$familyId]) !== $invite['token'],
+        '明文令牌不应入库');
+    expect_http_error(static fn () => \App\Services\FamilyService::acceptInvitation($outsider, $invite['token']), 404, '错邮箱不应接受邀请');
+
+    \App\Services\FamilyService::revokeInvitation($owner, (int) \App\Core\Db::value('SELECT id FROM family_invitations WHERE family_id = ?', [$familyId]));
+    expect_http_error(static fn () => \App\Services\FamilyService::acceptInvitation($invitee, $invite['token']), 404, '撤销后不应接受邀请');
+
+    $invite2 = \App\Services\FamilyService::invite($owner, $familyId, (string) $invitee['email'], 'genealogy_editor');
+    check(\App\Services\FamilyService::acceptInvitation($invitee, $invite2['token']) === $familyId, '接受邀请失败');
+    check(\App\Core\Policy::familyRole($familyId, (int) $invitee['id']) === 'genealogy_editor', '角色未生效');
+    expect_http_error(static fn () => \App\Services\FamilyService::acceptInvitation($invitee, $invite2['token']), 404, '令牌重放应失败');
+    check(\App\Core\Policy::can('person.edit', ['family_id' => $familyId], $invitee), '谱系编辑者应能编辑人物');
+    check(!\App\Core\Policy::can('family.manage', ['family_id' => $familyId], $invitee), '普通编辑者不应管理家族');
+});
+
+test('跨家族访问一律拒绝且不泄露资源存在性', function (): void {
+    $ownerA = make_family_user('cross-a');
+    $ownerB = make_family_user('cross-b');
+    $familyA = \App\Services\FamilyService::create($ownerA, '家族甲', 'cross-a-' . bin2hex(random_bytes(4)), ['privacy' => 'public']);
+    $familyB = \App\Services\FamilyService::create($ownerB, '家族乙', 'cross-b-' . bin2hex(random_bytes(4)), ['privacy' => 'public']);
+    $personB = \App\Services\FamilyPersonService::create($ownerB, $familyB, [
+        'name' => '乙家族人物', 'is_deceased' => true, 'privacy' => 'public',
+    ]);
+
+    check(\App\Core\Policy::can('family.view', ['family_id' => $familyA], $ownerB), '公开家族应允许访客查看');
+    check(!\App\Core\Policy::can('family.manage', ['family_id' => $familyA], $ownerB), '跨家族管理应拒绝');
+    check(!\App\Core\Policy::canViewResource('person', $personB, (int) $ownerA['id']), '跨家族人物不应可见');
+    check(\App\Services\FamilyPersonService::getVisible($ownerA, $personB) === null, '越权人物查询应返回 null');
+    expect_http_error(static fn () => \App\Core\Policy::require('family.manage', ['family_id' => $familyA], $ownerB), 404, '越权 require 应抛异常');
+    expect_http_error(static fn () => \App\Services\FamilyService::update($ownerB, $familyA, ['name' => '篡改']), 404, '跨家族改家族应拒绝');
+    expect_http_error(static fn () => \App\Services\FamilyPersonService::update($ownerA, $familyA, $personB, ['name' => '篡改']), 404, '跨家族改人物应拒绝');
+});
+
+test('移除/封禁成员的历史权限立即失效', function (): void {
+    $owner = make_family_user('remove-owner');
+    $member = make_family_user('remove-member');
+    $familyId = \App\Services\FamilyService::create($owner, '成员测试', 'remove-' . bin2hex(random_bytes(4)));
+    $invite = \App\Services\FamilyService::invite($owner, $familyId, (string) $member['email'], 'member');
+    \App\Services\FamilyService::acceptInvitation($member, $invite['token']);
+    check(\App\Core\Policy::can('family.view', ['family_id' => $familyId], $member), '成员应可查看家族');
+
+    \App\Services\FamilyService::removeMember($owner, $familyId, (int) $member['id']);
+    check(\App\Core\Policy::familyRole($familyId, (int) $member['id']) === null, '移除后角色应失效');
+    check(!\App\Core\Policy::can('family.view', ['family_id' => $familyId], $member), '移除后不应访问');
+
+    expect_http_error(static fn () => \App\Services\FamilyService::leave($owner, $familyId), 403, 'owner 不应直接退出');
+});
+
+test('活人资料默认私密，公开创建/更新被拒绝；逝者公开仍须核验', function (): void {
+    $owner = make_family_user('person-owner');
+    $outsider = make_family_user('person-visitor');
+    $familyId = \App\Services\FamilyService::create($owner, '人物测试', 'person-' . bin2hex(random_bytes(4)), ['privacy' => 'public']);
+
+    expect_http_error(static fn () => \App\Services\FamilyPersonService::create($owner, $familyId, [
+        'name' => '活人', 'privacy' => 'public', 'is_deceased' => false,
+    ]), 422, '活人资料不得直接公开');
+
+    $livingId = \App\Services\FamilyPersonService::create($owner, $familyId, [
+        'name' => '活人', 'privacy' => 'private', 'is_deceased' => false,
+    ]);
+    check(\App\Services\FamilyPersonService::getVisible($owner, $livingId) !== null, '创建者应可见活人资料');
+    check(\App\Services\FamilyPersonService::getVisible($outsider, $livingId) === null, '活人资料不应被访客看到');
+    expect_http_error(static fn () => \App\Services\FamilyPersonService::update($owner, $familyId, $livingId, ['privacy' => 'family']), 422, '活人不可改为非私密');
+
+    $deceasedId = \App\Services\FamilyPersonService::create($owner, $familyId, [
+        'name' => '逝者', 'privacy' => 'public', 'is_deceased' => true,
+    ]);
+    check((string) \App\Core\Db::value('SELECT verification_status FROM family_persons WHERE id = ?', [$deceasedId]) === 'none',
+        '新建人物不得自动成为已核验事实');
+    check(\App\Services\FamilyPersonService::getVisible($outsider, $deceasedId) === null, '未核验人物不应公开展示');
+    \App\Core\Db::update('family_persons', ['verification_status' => 'verified'], 'id = ?', [$deceasedId]);
+    \App\Core\Policy::clearCache();
+    check(\App\Services\FamilyPersonService::getVisible($outsider, $deceasedId) !== null, '核验后应公开展示');
+});
+
+test('角色调整必须写审计且禁止自审式越权', function (): void {
+    $owner = make_family_user('audit-owner');
+    $member = make_family_user('audit-member');
+    $familyId = \App\Services\FamilyService::create($owner, '审计测试', 'audit-' . bin2hex(random_bytes(4)));
+    $invite = \App\Services\FamilyService::invite($owner, $familyId, (string) $member['email'], 'member');
+    \App\Services\FamilyService::acceptInvitation($member, $invite['token']);
+    expect_http_error(static fn () => \App\Services\FamilyService::updateRole($member, $familyId, (int) $member['id'], 'admin'), 404, '成员不能自行提权');
+    \App\Services\FamilyService::updateRole($owner, $familyId, (int) $member['id'], 'admin');
+    check(\App\Core\Policy::familyRole($familyId, (int) $member['id']) === 'admin', '角色调整未生效');
+    check(db_count('audit_logs', "action = 'family.member.role' AND target_id = ?", [$familyId]) === 1, '角色调整未写审计');
+    expect_http_error(static fn () => \App\Services\FamilyService::updateRole($owner, $familyId, (int) $owner['id'], 'member'), 403, 'owner 不应被降级');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {
