@@ -2633,7 +2633,8 @@ test('阶段 E：Worker 原子领取、租约恢复与取消', function (): void
     $claimed = \App\Services\AiWorkflowService::claim('worker-a', 5);
     check(in_array($id, $claimed, true), '任务未被领取');
     check(\App\Services\AiWorkflowService::claim('worker-b', 5) === [], '同一任务不应被重复领取');
-    Db::update('ai_workflows', ['lease_until' => date('Y-m-d H:i:s', time() - 60)], 'id = ?', [$id]);
+    // 使用数据库时钟，避免 PHP 时区与 MySQL 时区不同导致租约判定不稳定。
+    Db::query('UPDATE ai_workflows SET lease_until = DATE_SUB(NOW(), INTERVAL 60 SECOND) WHERE id = ?', [$id]);
     $recovered = \App\Services\AiWorkflowService::recoverExpired();
     check($recovered['expired'] >= 1, '超时租约未回收');
     check((string) Db::value('SELECT failure_class FROM ai_workflows WHERE id = ?', [$id]) === 'lease_expired', '未记录租约超时');

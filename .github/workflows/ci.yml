@@ -29,6 +29,8 @@ jobs:
       APP_KEY: ci-only-key-not-for-production
       AI_ENABLED: "true"
       AI_PROVIDER: demo
+      WX_APPID: ci-test-appid
+      WX_SECRET: ci-test-secret
     steps:
       - uses: actions/checkout@v4
 
