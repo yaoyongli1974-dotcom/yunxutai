@@ -357,6 +357,26 @@ final class AiWorkflowService
         if (!in_array($sourceType, ['user_input', 'oral_history', 'archive_ocr', 'ai_extraction', 'family_confirmation', 'imported'], true)) {
             throw new HttpException(422, '未知的事实来源类型');
         }
+        Policy::require('ai.workflow.create', ['family_id' => $familyId, 'resource' => null], $user);
+        if ($personId !== null) {
+            $person = Db::fetch('SELECT family_id FROM family_persons WHERE id = ? AND deleted_at IS NULL LIMIT 1', [$personId]);
+            if ($person === null || (int) $person['family_id'] !== $familyId) {
+                throw new HttpException(404, '人物不属于该家族');
+            }
+        }
+        if ($sourceId !== null) {
+            $table = match ($sourceType) {
+                'oral_history' => 'oral_history_sessions',
+                'archive_ocr', 'ai_extraction' => 'archives',
+                default => null,
+            };
+            if ($table !== null) {
+                $src = Db::fetch("SELECT family_id FROM {$table} WHERE id = ? LIMIT 1", [$sourceId]);
+                if ($src === null || (int) $src['family_id'] !== $familyId) {
+                    throw new HttpException(404, '来源资料不属于该家族');
+                }
+            }
+        }
         $id = Db::insert('memory_facts', [
             'family_id' => $familyId,
             'person_id' => $personId,
@@ -394,13 +414,26 @@ final class AiWorkflowService
             throw new HttpException(404, '事实记录不存在');
         }
         Policy::require('ai.result.review', ['family_id' => (int) $fact['family_id'], 'resource' => null], $user);
-        Db::update('memory_facts', [
+        $before = (string) $fact['verification_status'];
+        if ($before === $status) {
+            throw new HttpException(422, '状态未发生变化');
+        }
+        if ($before === 'confirmed' && $status === 'rejected') {
+            throw new HttpException(422, '已确认事实不能直接驳回，请先标记为争议');
+        }
+        if ($before === 'rejected' && $status === 'confirmed') {
+            throw new HttpException(422, '已驳回的事实需重新提交后再审核');
+        }
+        $updated = Db::update('memory_facts', [
             'verification_status' => $status,
             'reviewed_by' => (int) ($user['id'] ?? 0),
             'reviewed_at' => date('Y-m-d H:i:s'),
-        ], 'id = ?', [$factId]);
+        ], 'id = ? AND verification_status = ?', [$factId, $before]);
+        if ($updated !== 1) {
+            throw new HttpException(409, '事实状态已被其他审核修改，请刷新后重试');
+        }
         Audit::log('ai.fact.reviewed', 'memory_fact', $factId, [
-            'family_id' => (int) $fact['family_id'], 'status' => $status,
+            'family_id' => (int) $fact['family_id'], 'from' => $before, 'to' => $status,
         ], (int) ($user['id'] ?? 0));
     }
 
@@ -638,5 +671,149 @@ final class AiWorkflowService
             }
         }
         return $out;
+    }
+
+    /** F-01：资源级授权——工作流详情必须按 family_id 过 Policy，未授权返回 null。 */
+    public static function getVisible(?array $user, int $id): ?array
+    {
+        $wf = self::find($id);
+        if ($wf === null) {
+            return null;
+        }
+        $familyId = (int) ($wf['family_id'] ?? 0);
+        if ($familyId <= 0 || !self::familyVisible($familyId, $user)) {
+            return null;
+        }
+        return $wf;
+    }
+
+    /** F-01：步骤读取必须先经过已授权的工作流。 */
+    public static function visibleSteps(?array $user, int $id): array
+    {
+        return self::getVisible($user, $id) === null ? [] : self::steps($id);
+    }
+
+    /** E-02/E-03：校验会话归属与授权，返回已授权的会话与音频文件。 */
+    public static function sessionAudio(?array $user, int $sessionId): array
+    {
+        $session = self::session($sessionId);
+        if ($session === null) {
+            throw new HttpException(404, '采访会话不存在');
+        }
+        $familyId = (int) $session['family_id'];
+        if (!self::familyVisible($familyId, $user)) {
+            throw new HttpException(404, '采访会话不存在');
+        }
+        if ((string) $session['consent_status'] !== 'granted') {
+            throw new HttpException(422, '受访者未授权或已撤回授权');
+        }
+        $fileId = (int) ($session['audio_file_id'] ?? 0);
+        if ($fileId <= 0) {
+            throw new HttpException(422, '会话尚无音频文件');
+        }
+        $file = Db::fetch(
+            'SELECT f.*, a.family_id FROM archive_files f INNER JOIN archives a ON a.id = f.archive_id WHERE f.id = ? LIMIT 1',
+            [$fileId]
+        );
+        if ($file === null || (int) $file['family_id'] !== $familyId) {
+            throw new HttpException(404, '音频文件不属于该家族会话');
+        }
+        return [$session, $file];
+    }
+
+    /** E-03：为已授权会话创建转写工作流；实际执行仍走 run()/ProcessingClient。 */
+    public static function transcribeSession(?array $user, int $sessionId): int
+    {
+        [$session, $file] = self::sessionAudio($user, $sessionId);
+        return self::create($user, (int) $session['family_id'], 'transcribe_audio', [
+            'session_id' => $sessionId,
+            'file_id' => (int) $file['id'],
+        ], 'oral-' . $sessionId . '-' . md5((string) $session['updated_at'] ?? ''));
+    }
+
+    /** E-02：撤销授权时取消尚未执行的会话任务，已执行内容保留审计并限制访问。 */
+    public static function revokeSessionConsent(?array $user, int $sessionId): void
+    {
+        [, $session] = [null, self::session($sessionId)];
+        if ($session === null) {
+            throw new HttpException(404, '采访会话不存在');
+        }
+        self::setConsent($user, $sessionId, false);
+        Db::query(
+            "UPDATE ai_workflows SET status = 'cancelled', locked_by = NULL, lease_until = NULL
+             WHERE family_id = ? AND status IN ('queued','processing')
+               AND JSON_EXTRACT(input_json, '$.session_id') = ?",
+            [(int) $session['family_id'], $sessionId]
+        );
+        Audit::log('oral_history.consent_revoked', 'oral_history_session', $sessionId, [
+            'family_id' => (int) $session['family_id'],
+        ], $user === null ? 0 : (int) $user['id']);
+    }
+
+    private static function familyVisible(int $familyId, ?array $user): bool
+    {
+        $family = Db::fetch("SELECT privacy, status FROM families WHERE id = ? LIMIT 1", [$familyId]);
+        if ($family === null || $family['status'] !== 'active') {
+            return false;
+        }
+        $uid = $user === null ? null : (int) $user['id'];
+        return $family['privacy'] === 'public' || \App\Core\Policy::familyRole($familyId, $uid) !== null;
+    }
+
+    /** E-04：新增片段时校验时间区间与会话家族，未审核状态固定 pending。 */
+    public static function addSegmentChecked(?array $user, int $sessionId, array $data): int
+    {
+        $session = self::session($sessionId);
+        if ($session === null || !self::familyVisible((int) $session['family_id'], $user)) {
+            throw new HttpException(404, '采访不存在');
+        }
+        $start = max(0, (int) ($data['start_time'] ?? 0));
+        $end = max(0, (int) ($data['end_time'] ?? 0));
+        if ($end > 0 && $end <= $start) {
+            throw new HttpException(422, '片段结束时间必须大于开始时间');
+        }
+        return self::addSegment($user, $sessionId, $data);
+    }
+
+    /** E-04：人工修正片段文本，保留原始转写；修正后仍为 pending，需重新审核。 */
+    public static function correctSegment(?array $user, int $segmentId, string $corrected): void
+    {
+        $segment = Db::fetch('SELECT * FROM oral_history_segments WHERE id = ? LIMIT 1', [$segmentId]);
+        if ($segment === null) {
+            throw new HttpException(404, '转写片段不存在');
+        }
+        $session = self::session((int) $segment['session_id']);
+        if ($session === null) {
+            throw new HttpException(404, '采访不存在');
+        }
+        Policy::require('ai.workflow.create', ['family_id' => (int) $session['family_id'], 'resource' => null], $user);
+        Db::update('oral_history_segments', [
+            'corrected_transcript' => mb_substr($corrected, 0, 5000),
+            'review_status' => 'pending',
+        ], 'id = ?', [$segmentId]);
+        Audit::log('oral.segment.corrected', 'oral_history_segment', $segmentId, [
+            'session_id' => (int) $segment['session_id'],
+        ], (int) ($user['id'] ?? 0));
+    }
+
+    /** E-04：导出已审核的完整采访文本，未审核内容不进入导出。 */
+    public static function exportSessionTranscript(?array $user, int $sessionId): array
+    {
+        $session = self::session($sessionId);
+        if ($session === null || !self::familyVisible((int) $session['family_id'], $user)) {
+            throw new HttpException(404, '采访不存在');
+        }
+        $lines = [];
+        foreach (self::segments($sessionId) as $seg) {
+            if ($seg['review_status'] !== 'confirmed') {
+                continue;
+            }
+            $text = (string) ($seg['corrected_transcript'] ?? '') ?: (string) ($seg['transcript'] ?? '');
+            $lines[] = sprintf('[%s-%s] %s: %s', $seg['start_time'], $seg['end_time'], $seg['speaker'], $text);
+        }
+        Audit::log('oral.session.exported', 'oral_history_session', $sessionId, [
+            'family_id' => (int) $session['family_id'], 'segments' => count($lines),
+        ], (int) ($user['id'] ?? 0));
+        return ['session_id' => $sessionId, 'lines' => $lines, 'exported_at' => date('c')];
     }
 }

@@ -267,13 +267,22 @@ final class FamilyV2Controller extends BaseController
 
     public function workflow(Request $request, string $workflowId): Response
     {
-        $workflow = $this->call(fn () => AiWorkflowService::find($this->id($workflowId)));
-        if ($workflow === null) {
+        $wf = $this->call(fn () => AiWorkflowService::getVisible($this->user(), $this->id($workflowId)));
+        if ($wf === null) {
             throw ApiException::notFound('AI 任务不存在');
         }
+        // F-03：只返回必要字段，不暴露 input_json / provider / 存储路径 / 内部错误。
         return Api::ok([
-            'workflow' => $workflow,
-            'steps' => AiWorkflowService::steps((int) $workflow['id']),
+            'workflow' => [
+                'id' => (int) $wf['id'],
+                'workflow_type' => $wf['workflow_type'] ?? null,
+                'status' => $wf['status'] ?? null,
+                'current_step' => $wf['current_step'] ?? null,
+                'created_at' => $wf['created_at'] ?? null,
+                'finished_at' => $wf['finished_at'] ?? null,
+                'failure_class' => $wf['failure_class'] ?? null,
+            ],
+            'steps' => AiWorkflowService::visibleSteps($this->user(), (int) $wf['id']),
         ]);
     }
 
@@ -366,5 +375,77 @@ final class FamilyV2Controller extends BaseController
     public function readAllNotifications(Request $request): Response
     {
         return Api::ok(['updated' => NotificationService::markAllRead((int) $this->user()['id'])]);
+    }
+
+    public function createOralSession(Request $request, string $id): Response
+    {
+        $data = [];
+        foreach (['title', 'topic', 'interviewer', 'interviewee_person_id', 'audio_file_id'] as $key) {
+            $data[$key] = Input::string($request, $key);
+        }
+        $sessionId = $this->call(fn () => AiWorkflowService::createOralSession($this->user(), $this->id($id), $data));
+        return Api::ok(['id' => $sessionId], 201);
+    }
+
+    public function oralSession(Request $request, string $sessionId): Response
+    {
+        $session = $this->call(fn () => AiWorkflowService::session($this->id($sessionId)));
+        if ($session === null) {
+            throw ApiException::notFound('采访会话不存在');
+        }
+        return Api::ok(['session' => $session]);
+    }
+
+    public function sessionConsent(Request $request, string $sessionId): Response
+    {
+        $granted = Input::bool($request, 'granted');
+        if ($granted) {
+            $this->call(fn () => AiWorkflowService::setConsent($this->user(), $this->id($sessionId), true));
+        } else {
+            $this->call(fn () => AiWorkflowService::revokeSessionConsent($this->user(), $this->id($sessionId)));
+        }
+        return Api::ok(['ok' => true]);
+    }
+
+    public function sessionSegments(Request $request, string $sessionId): Response
+    {
+        return Api::ok(['items' => $this->call(fn () => AiWorkflowService::segments($this->id($sessionId)))]);
+    }
+
+    public function transcribeSession(Request $request, string $sessionId): Response
+    {
+        $id = $this->call(fn () => AiWorkflowService::transcribeSession($this->user(), $this->id($sessionId)));
+        return Api::ok(['id' => $id, 'status' => 'queued'], 201);
+    }
+
+    public function addSegment(Request $request, string $sessionId): Response
+    {
+        $data = [];
+        foreach (['speaker', 'start_time', 'end_time', 'transcript'] as $key) {
+            $data[$key] = Input::string($request, $key);
+        }
+        $id = $this->call(fn () => AiWorkflowService::addSegmentChecked($this->user(), $this->id($sessionId), $data));
+        return Api::ok(['id' => $id], 201);
+    }
+
+    public function correctSegment(Request $request, string $segmentId): Response
+    {
+        $this->call(fn () => AiWorkflowService::correctSegment(
+            $this->user(), $this->id($segmentId), Input::string($request, 'corrected_transcript')
+        ));
+        return Api::ok(['ok' => true]);
+    }
+
+    public function reviewSegment(Request $request, string $segmentId): Response
+    {
+        $this->call(fn () => AiWorkflowService::reviewSegment(
+            $this->user(), $this->id($segmentId), Input::bool($request, 'approve'), Input::string($request, 'corrected_transcript')
+        ));
+        return Api::ok(['ok' => true]);
+    }
+
+    public function exportSession(Request $request, string $sessionId): Response
+    {
+        return Api::ok($this->call(fn () => AiWorkflowService::exportSessionTranscript($this->user(), $this->id($sessionId))));
     }
 }

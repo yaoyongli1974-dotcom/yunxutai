@@ -3162,6 +3162,99 @@ test('Round2 C05：独立 Worker CLI 单次模式可运行', function (): void {
     check(is_file(dirname(__DIR__) . '/deploy/ai-workflow-worker.service'), 'systemd 单元缺失');
 });
 
+echo "\n[Round2 Phase 3：口述历史与 AI 资源授权]\n";
+
+test('Round2 F：工作流详情按家族授权且输出最小化', function (): void {
+    $owner = make_family_user('p3-owner');
+    $outsider = make_family_user('p3-outsider');
+    $familyId = \App\Services\FamilyService::create($owner, 'AI 授权家族', 'p3-ai-' . bin2hex(random_bytes(3)), ['privacy' => 'private']);
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', ['text' => '内部资料']);
+    check(\App\Services\AiWorkflowService::getVisible($owner, $id) !== null, '创建者应可见');
+    check(\App\Services\AiWorkflowService::getVisible($outsider, $id) === null, '跨家族任务应不可见');
+    check(\App\Services\AiWorkflowService::visibleSteps($outsider, $id) === [], '跨家族步骤应不可见');
+    login((string) $owner['email'], 'FamilyTest@123');
+    $res = api('GET', '/api/v1/ai/workflows/' . $id, null, api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $owner['email'], 'password' => 'FamilyTest@123',
+    ])));
+    check($res['status'] === 200, '工作流详情应可访问：' . $res['raw']);
+    check(!str_contains($res['raw'], 'input_json') && !str_contains($res['raw'], '内部资料'), '详情不应暴露输入或内部字段');
+});
+
+test('Round2 E：会话授权、跨家族与撤销授权停止转写', function (): void {
+    $owner = make_family_user('p3-oral');
+    $outsider = make_family_user('p3-oral-out');
+    $familyId = \App\Services\FamilyService::create($owner, '口述家族', 'p3-oral-' . bin2hex(random_bytes(3)), ['privacy' => 'private']);
+    $sessionId = \App\Services\AiWorkflowService::createOralSession($owner, $familyId, ['title' => '祖辈访谈']);
+    try {
+        \App\Services\AiWorkflowService::sessionAudio($outsider, $sessionId);
+        check(false, '未授权用户不应读取会话音频');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 404, '跨家族会话应 404');
+    }
+    try {
+        \App\Services\AiWorkflowService::transcribeSession($owner, $sessionId);
+        check(false, '未授权会话不应创建转写任务');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 422, '未授权会话应 422');
+    }
+    \App\Services\AiWorkflowService::setConsent($owner, $sessionId, true);
+    $token = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $owner['email'], 'password' => 'FamilyTest@123',
+    ]));
+    $sessions = api('GET', '/api/v1/families/' . $familyId . '/ai/sessions', null, $token);
+    check($sessions['status'] === 200, '会话列表应可访问');
+    $one = api('GET', '/api/v1/ai/sessions/' . $sessionId, null, $token);
+    check($one['status'] === 200, '会话详情应可访问');
+    $revoke = api('POST', '/api/v1/ai/sessions/' . $sessionId . '/consent', ['granted' => false], $token);
+    check($revoke['status'] === 200, '撤销授权应成功');
+    check((string) Db::value('SELECT consent_status FROM oral_history_sessions WHERE id = ?', [$sessionId]) === 'revoked', '授权状态未更新');
+});
+
+test('Round2 F02：事实候选家族校验与审核状态流转', function (): void {
+    $owner = make_family_user('p3-fact');
+    $other = make_family_user('p3-fact-out');
+    $familyId = \App\Services\FamilyService::create($owner, '事实家族', 'p3-fact-' . bin2hex(random_bytes(3)), ['privacy' => 'private']);
+    $otherFamily = \App\Services\FamilyService::create($other, '他族', 'p3-fact-o-' . bin2hex(random_bytes(3)), ['privacy' => 'private']);
+    $personId = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '人物', 'privacy' => 'private', 'death_date' => '1990-01-01']);
+    $factId = \App\Services\AiWorkflowService::addFactCandidate($owner, $familyId, 'event', '待核实事件', 'user_input', null, $personId);
+    try {
+        \App\Services\AiWorkflowService::addFactCandidate($other, $otherFamily, 'event', '跨族事实', 'user_input', null, $personId);
+        check(false, '跨家族人物事实应被拒绝');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 404, '跨家族人物应 404');
+    }
+    \App\Services\AiWorkflowService::reviewFact($owner, $factId, 'confirmed');
+    check((string) Db::value('SELECT verification_status FROM memory_facts WHERE id = ?', [$factId]) === 'confirmed', '审核未生效');
+    try {
+        \App\Services\AiWorkflowService::reviewFact($owner, $factId, 'rejected');
+        check(false, '重复状态变更应被拒绝');
+    } catch (\App\Core\HttpException $e) {
+        check(in_array($e->getStatusCode(), [409, 422], true), '并发/重复审核应拒绝');
+    }
+    check(db_count('audit_logs', "action = 'ai.fact.reviewed' AND target_id = ?", [$factId]) >= 1, '审核未写审计');
+});
+
+test('Round2 E04：分段修正、审核与导出仅含已确认内容', function (): void {
+    $owner = make_family_user('p3-seg');
+    $familyId = \App\Services\FamilyService::create($owner, '分段家族', 'p3-seg-' . bin2hex(random_bytes(3)), ['privacy' => 'private']);
+    $sessionId = \App\Services\AiWorkflowService::createOralSession($owner, $familyId, ['title' => '访谈']);
+    \App\Services\AiWorkflowService::setConsent($owner, $sessionId, true);
+    $segId = \App\Services\AiWorkflowService::addSegmentChecked($owner, $sessionId, [
+        'speaker' => '受访者', 'start_time' => '00:00:01', 'end_time' => '00:00:09', 'transcript' => '原始转写',
+    ]);
+    check($segId > 0, '分段创建失败');
+    $token = api_token_of(api('POST', '/api/v1/auth/token', ['email' => (string) $owner['email'], 'password' => 'FamilyTest@123']));
+    $list = api('GET', '/api/v1/ai/sessions/' . $sessionId . '/segments', null, $token);
+    check($list['status'] === 200, '分段列表应可访问');
+    $correct = api('POST', '/api/v1/ai/segments/' . $segId . '/correct', ['corrected_transcript' => '人工修正稿'], $token);
+    check($correct['status'] === 200, '人工修正应成功：' . $correct['raw']);
+    check((string) Db::value('SELECT review_status FROM oral_history_segments WHERE id = ?', [$segId]) === 'pending', '修正后应重新待审核');
+    $review = api('POST', '/api/v1/ai/segments/' . $segId . '/review', ['approve' => true, 'corrected_transcript' => '人工修正稿'], $token);
+    check($review['status'] === 200, '审核应成功：' . $review['raw']);
+    $export = api('GET', '/api/v1/ai/sessions/' . $sessionId . '/export', null, $token);
+    check($export['status'] === 200 && str_contains($export['raw'], '人工修正稿'), '导出应包含已确认的修正稿');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

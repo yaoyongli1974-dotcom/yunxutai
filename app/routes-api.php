@@ -81,6 +81,15 @@ return static function (Router $router): void {
     $router->post('/api/v1/families/{id}/archives', Api::route([FamilyV2Controller::class, 'createArchive']), ['api-auth']);
     $router->post('/api/v1/families/{id}/ai/workflows', Api::route([FamilyV2Controller::class, 'createWorkflow']), ['api-auth']);
     $router->get('/api/v1/families/{id}/ai/sessions', Api::route([FamilyV2Controller::class, 'oralSessions']), ['api-auth']);
+    $router->post('/api/v1/families/{id}/ai/sessions', Api::route([FamilyV2Controller::class, 'createOralSession']), ['api-auth']);
+    $router->get('/api/v1/ai/sessions/{id}', Api::route([FamilyV2Controller::class, 'oralSession']), ['api-auth']);
+    $router->post('/api/v1/ai/sessions/{id}/consent', Api::route([FamilyV2Controller::class, 'sessionConsent']), ['api-auth']);
+    $router->post('/api/v1/ai/sessions/{id}/transcribe', Api::route([FamilyV2Controller::class, 'transcribeSession']), ['api-auth']);
+    $router->get('/api/v1/ai/sessions/{id}/segments', Api::route([FamilyV2Controller::class, 'sessionSegments']), ['api-auth']);
+    $router->post('/api/v1/ai/sessions/{id}/segments', Api::route([FamilyV2Controller::class, 'addSegment']), ['api-auth']);
+    $router->get('/api/v1/ai/sessions/{id}/export', Api::route([FamilyV2Controller::class, 'exportSession']), ['api-auth']);
+    $router->post('/api/v1/ai/segments/{id}/correct', Api::route([FamilyV2Controller::class, 'correctSegment']), ['api-auth']);
+    $router->post('/api/v1/ai/segments/{id}/review', Api::route([FamilyV2Controller::class, 'reviewSegment']), ['api-auth']);
     $router->get('/api/v1/families/{id}/events', Api::route([FamilyV2Controller::class, 'events']), ['api-auth']);
     $router->post('/api/v1/families/{id}/events', Api::route([FamilyV2Controller::class, 'createEvent']), ['api-auth']);
     $router->get('/api/v1/families/{id}/exhibitions', Api::route([FamilyV2Controller::class, 'exhibitions']), ['api-auth']);
