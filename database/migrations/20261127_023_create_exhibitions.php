@@ -1,0 +1,11 @@
+<?php
+declare(strict_types=1);
+
+return [
+    'version' => '20261127_023',
+    'name' => 'create_exhibitions',
+    'sql' => [
+        "CREATE TABLE IF NOT EXISTS exhibitions (\n    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n    family_id BIGINT UNSIGNED NOT NULL,\n    title VARCHAR(180) NOT NULL,\n    description TEXT NULL,\n    cover_archive_id BIGINT UNSIGNED DEFAULT NULL,\n    theme VARCHAR(80) DEFAULT NULL,\n    privacy ENUM('private','family','public') NOT NULL DEFAULT 'family',\n    status ENUM('draft','review','published','offline') NOT NULL DEFAULT 'draft',\n    owner_type ENUM('family','institution') NOT NULL DEFAULT 'family',\n    institution_key VARCHAR(80) DEFAULT NULL,\n    created_by BIGINT UNSIGNED NOT NULL,\n    published_at DATETIME DEFAULT NULL,\n    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n    PRIMARY KEY (id),\n    KEY idx_exhibition_family (family_id, status),\n    CONSTRAINT fk_exhibition_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,\n    CONSTRAINT fk_exhibition_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+        "CREATE TABLE IF NOT EXISTS exhibition_items (\n    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n    exhibition_id BIGINT UNSIGNED NOT NULL,\n    item_type ENUM('archive','person','event','life_event') NOT NULL,\n    item_id BIGINT UNSIGNED NOT NULL,\n    section VARCHAR(80) NOT NULL DEFAULT 'default',\n    sort_order INT UNSIGNED NOT NULL DEFAULT 0,\n    caption VARCHAR(255) DEFAULT NULL,\n    status ENUM('active','hidden') NOT NULL DEFAULT 'active',\n    created_by BIGINT UNSIGNED NOT NULL,\n    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    PRIMARY KEY (id),\n    UNIQUE KEY uq_exhibition_item (exhibition_id, item_type, item_id),\n    KEY idx_exhibition_sort (exhibition_id, section, sort_order),\n    CONSTRAINT fk_exhibition_item_exhibition FOREIGN KEY (exhibition_id) REFERENCES exhibitions (id) ON DELETE CASCADE,\n    CONSTRAINT fk_exhibition_item_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    ],
+];

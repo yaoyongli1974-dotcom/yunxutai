@@ -123,6 +123,7 @@ final class Policy
         'archive.delete.request' => self::FAMILY_ROLES,
         'archive.delete.approve' => ['owner', 'admin'],
         'file.download' => self::FAMILY_ROLES,
+        'timeline.edit' => ['owner', 'admin', 'genealogy_editor'],
         'ai.workflow.create' => ['owner', 'admin', 'genealogy_editor', 'archive_editor'],
         'ai.result.review' => ['owner', 'admin'],
         'oral_history.consent.manage' => ['owner', 'admin'],

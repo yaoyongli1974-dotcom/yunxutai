@@ -2672,6 +2672,100 @@ test('阶段 E：口述历史授权前不可录入，撤回后不可复核', fun
     }
 });
 
+
+test('阶段 F：家族事件可关联人物，公开事件访客可见而私密事件不可见', function (): void {
+    check(db_count('schema_migrations', "version LIKE '20261127_0%' AND status = 'applied'") >= 24, '阶段 F 迁移未全部应用');
+    $owner = make_family_user('f-timeline');
+    $familyId = \App\Services\FamilyService::create($owner, '时间轴家族', 'f-tl-' . bin2hex(random_bytes(3)), ['privacy' => 'public']);
+    $personId = \App\Services\FamilyPersonService::create($owner, $familyId, [
+        'name' => '家族长辈', 'gender' => 'female', 'birth_date' => '1930-01-01',
+        'death_date' => '2000-01-01', 'privacy' => 'private',
+    ]);
+    $publicId = \App\Services\FamilyTimelineService::create($owner, $familyId, [
+        'title' => '迁居南方', 'event_date' => '1990-03-15', 'privacy' => 'public',
+        'source_type' => 'oral_history', 'person_ids' => [$personId],
+    ]);
+    $privateId = \App\Services\FamilyTimelineService::create($owner, $familyId, [
+        'title' => '家庭内部事项', 'event_date' => '1991-04-01', 'privacy' => 'private',
+    ]);
+    check(count(\App\Services\FamilyTimelineService::persons($publicId)) === 1, '事件人物关联失败');
+    check(count(\App\Services\FamilyTimelineService::events($owner, $familyId)) === 2, '成员应看到全部事件');
+    login((string) $owner['email'], 'FamilyTest@123');
+    check(http('GET', '/families/' . $familyId . '/timeline')['status'] === 200, '时间轴页面不可访问');
+    reset_session();
+    $visitorEvents = \App\Services\FamilyTimelineService::events(null, $familyId);
+    check(count($visitorEvents) === 1 && (int) $visitorEvents[0]['id'] === $publicId, '访客可见性过滤失败');
+    check(\App\Services\FamilyTimelineService::event(null, $privateId) === null, '私密事件对访客泄露');
+    \App\Services\FamilyTimelineService::archive($owner, $publicId);
+    check(\App\Services\FamilyTimelineService::event($owner, $publicId) === null, '归档事件仍可见');
+});
+
+test('阶段 F：展馆发布前复核内容可见性，草稿不对外暴露', function (): void {
+    $owner = make_family_user('f-exhibit');
+    $familyId = \App\Services\FamilyService::create($owner, '展馆家族', 'f-ex-' . bin2hex(random_bytes(3)), ['privacy' => 'public']);
+    $exhibitionId = \App\Services\ExhibitionService::create($owner, $familyId, [
+        'title' => '家族记忆展', 'privacy' => 'public',
+    ]);
+    $privateArchive = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '私密信件', 'privacy' => 'private']);
+    \App\Services\ExhibitionService::addItem($owner, $exhibitionId, 'archive', $privateArchive);
+    try {
+        \App\Services\ExhibitionService::publish($owner, $exhibitionId);
+        check(false, '含私密档案的展馆不应发布');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 422, '发布校验应返回 422');
+    }
+    check((string) Db::value('SELECT status FROM exhibitions WHERE id = ?', [$exhibitionId]) === 'draft', '发布失败后状态被改变');
+    \App\Services\ExhibitionService::hideItem($owner, (int) Db::value('SELECT id FROM exhibition_items WHERE exhibition_id = ?', [$exhibitionId]));
+    \App\Services\ExhibitionService::publish($owner, $exhibitionId);
+    check((string) Db::value('SELECT status FROM exhibitions WHERE id = ?', [$exhibitionId]) === 'published', '展馆发布失败');
+    check(\App\Services\ExhibitionService::visible(null, $exhibitionId) !== null, '公开展馆访客不可见');
+    \App\Services\ExhibitionService::offline($owner, $exhibitionId);
+    check(\App\Services\ExhibitionService::visible(null, $exhibitionId) === null, '下线展馆仍对访客可见');
+});
+
+test('阶段 F：跨家族内容不可加入展馆或归档事件', function (): void {
+    $ownerA = make_family_user('f-iso-a');
+    $ownerB = make_family_user('f-iso-b');
+    $familyA = \App\Services\FamilyService::create($ownerA, '家族甲', 'f-iso-a-' . bin2hex(random_bytes(3)));
+    $familyB = \App\Services\FamilyService::create($ownerB, '家族乙', 'f-iso-b-' . bin2hex(random_bytes(3)));
+    $archiveB = \App\Services\ArchiveService::create($ownerB, $familyB, ['title' => '乙族档案', 'privacy' => 'private']);
+    $exhibitionA = \App\Services\ExhibitionService::create($ownerA, $familyA, ['title' => '甲族展馆']);
+    try {
+        \App\Services\ExhibitionService::addItem($ownerA, $exhibitionA, 'archive', $archiveB);
+        check(false, '跨家族档案不应加入展馆');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 404, '跨家族内容应返回 404');
+    }
+    $eventB = \App\Services\FamilyTimelineService::create($ownerB, $familyB, ['title' => '乙族事件', 'event_date' => '1980-01-01']);
+    try {
+        \App\Services\FamilyTimelineService::archive($ownerA, $eventB);
+        check(false, '不应归档他族事件');
+    } catch (\App\Core\HttpException $e) {
+        check(true, '跨家族归档被拒绝');
+    }
+});
+
+test('阶段 F：通知中心、偏好与失败旁路', function (): void {
+    $owner = make_family_user('f-notify');
+    \App\Core\Notify::configure(['driver' => 'log']);
+    $id = \App\Services\NotificationService::emit(null, (int) $owner['id'], 'family_invitation', '家族邀请', '内容');
+    check((string) Db::value('SELECT status FROM notifications WHERE id = ?', [$id]) === 'sent', '站内通知未送达');
+    \App\Services\NotificationService::markRead((int) $owner['id'], $id);
+    check(Db::value('SELECT read_at FROM notifications WHERE id = ?', [$id]) !== null, '已读状态未保存');
+    \App\Services\NotificationService::setPreference((int) $owner['id'], 'ai_workflow_completed', false, true);
+    \App\Services\NotificationService::emit(null, (int) $owner['id'], 'ai_workflow_completed', '任务完成', '请审核', '/notifications', true);
+    check(db_count('notifications', 'user_id = ? AND type = ? AND channel = ?', [
+        (int) $owner['id'], 'ai_workflow_completed', 'email',
+    ]) === 1, '邮件通知未记录');
+    check((string) Db::value("SELECT status FROM notifications WHERE user_id = ? AND type = ? AND channel = 'in_app' ORDER BY id DESC LIMIT 1", [
+        (int) $owner['id'], 'ai_workflow_completed',
+    ]) === 'failed', '关闭站内偏好后仍送达站内通知');
+    \App\Services\NotificationService::setPreference((int) $owner['id'], 'export_ready', true, true);
+    \App\Core\Notify::configure(['driver' => 'none']);
+    \App\Services\NotificationService::emit(null, (int) $owner['id'], 'export_ready', '导出完成', '', null, true);
+    check((string) Db::value("SELECT status FROM notifications WHERE type = 'export_ready' AND channel = 'email' ORDER BY id DESC LIMIT 1") === 'failed', '邮件失败状态未记录');
+    \App\Core\Notify::reset();
+});
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

@@ -860,3 +860,112 @@ CREATE TABLE IF NOT EXISTS ai_generation_logs (
     CONSTRAINT fk_ai_generation_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
     CONSTRAINT fk_ai_generation_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 2.0 阶段 F：时间轴、展馆与通知
+CREATE TABLE IF NOT EXISTS family_events (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    family_id BIGINT UNSIGNED NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    description TEXT NULL,
+    event_date DATE NOT NULL,
+    end_date DATE DEFAULT NULL,
+    location VARCHAR(180) DEFAULT NULL,
+    event_type VARCHAR(40) NOT NULL DEFAULT 'other',
+    privacy ENUM('private','family','public') NOT NULL DEFAULT 'family',
+    source_type ENUM('user_input','archive','oral_history','person_profile','imported') NOT NULL DEFAULT 'user_input',
+    source_id BIGINT UNSIGNED DEFAULT NULL,
+    status ENUM('active','archived') NOT NULL DEFAULT 'active',
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_family_event_time (family_id, event_date),
+    KEY idx_family_event_status (status, privacy),
+    CONSTRAINT fk_family_event_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+    CONSTRAINT fk_family_event_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS family_event_persons (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    event_id BIGINT UNSIGNED NOT NULL,
+    person_id BIGINT UNSIGNED NOT NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_family_event_person (event_id, person_id),
+    CONSTRAINT fk_event_person_event FOREIGN KEY (event_id) REFERENCES family_events (id) ON DELETE CASCADE,
+    CONSTRAINT fk_event_person_person FOREIGN KEY (person_id) REFERENCES family_persons (id) ON DELETE CASCADE,
+    CONSTRAINT fk_event_person_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS exhibitions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    family_id BIGINT UNSIGNED NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    description TEXT NULL,
+    cover_archive_id BIGINT UNSIGNED DEFAULT NULL,
+    theme VARCHAR(80) DEFAULT NULL,
+    privacy ENUM('private','family','public') NOT NULL DEFAULT 'family',
+    status ENUM('draft','review','published','offline') NOT NULL DEFAULT 'draft',
+    owner_type ENUM('family','institution') NOT NULL DEFAULT 'family',
+    institution_key VARCHAR(80) DEFAULT NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    published_at DATETIME DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_exhibition_family (family_id, status),
+    CONSTRAINT fk_exhibition_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE CASCADE,
+    CONSTRAINT fk_exhibition_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS exhibition_items (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    exhibition_id BIGINT UNSIGNED NOT NULL,
+    item_type ENUM('archive','person','event','life_event') NOT NULL,
+    item_id BIGINT UNSIGNED NOT NULL,
+    section VARCHAR(80) NOT NULL DEFAULT 'default',
+    sort_order INT UNSIGNED NOT NULL DEFAULT 0,
+    caption VARCHAR(255) DEFAULT NULL,
+    status ENUM('active','hidden') NOT NULL DEFAULT 'active',
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_exhibition_item (exhibition_id, item_type, item_id),
+    KEY idx_exhibition_sort (exhibition_id, section, sort_order),
+    CONSTRAINT fk_exhibition_item_exhibition FOREIGN KEY (exhibition_id) REFERENCES exhibitions (id) ON DELETE CASCADE,
+    CONSTRAINT fk_exhibition_item_creator FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id BIGINT UNSIGNED NOT NULL,
+    family_id BIGINT UNSIGNED DEFAULT NULL,
+    type VARCHAR(60) NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    body TEXT NULL,
+    link VARCHAR(255) DEFAULT NULL,
+    channel ENUM('in_app','email') NOT NULL DEFAULT 'in_app',
+    status ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+    read_at DATETIME DEFAULT NULL,
+    error_message VARCHAR(255) DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_notification_user (user_id, read_at, created_at),
+    KEY idx_notification_family (family_id, type),
+    CONSTRAINT fk_notification_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_notification_family FOREIGN KEY (family_id) REFERENCES families (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id BIGINT UNSIGNED NOT NULL,
+    type VARCHAR(60) NOT NULL,
+    in_app TINYINT(1) NOT NULL DEFAULT 1,
+    email TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_notification_pref (user_id, type),
+    CONSTRAINT fk_notification_pref_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

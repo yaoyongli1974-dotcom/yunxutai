@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 use App\Controllers\AccountController;
 use App\Controllers\AiWorkshopController;
+use App\Controllers\ExhibitionController;
+use App\Controllers\NotificationController;
+use App\Controllers\TimelineController;
 use App\Controllers\Admin\ClaimController as AdminClaimController;
 use App\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Controllers\Admin\DataRequestController as AdminDataRequestController;
@@ -185,6 +188,21 @@ $router->post('/families/{id}/ai/oral-sessions', [AiWorkshopController::class, '
 $router->post('/families/{id}/ai/oral-sessions/{sessionId}/consent', [AiWorkshopController::class, 'consent'], ['auth']);
 $router->post('/families/{id}/ai/oral-sessions/{sessionId}/segments', [AiWorkshopController::class, 'addSegment'], ['auth']);
 $router->post('/ai/segments/{id}/review', [AiWorkshopController::class, 'reviewSegment'], ['auth']);
+
+// 阶段 F：家族时间轴、数字展馆与统一通知中心
+$router->get('/families/{id}/timeline', [TimelineController::class, 'index'], ['auth']);
+$router->post('/families/{id}/timeline', [TimelineController::class, 'store'], ['auth']);
+$router->post('/family-events/{id}/archive', [TimelineController::class, 'archive'], ['auth']);
+$router->get('/families/{id}/exhibitions', [ExhibitionController::class, 'index'], ['auth']);
+$router->post('/families/{id}/exhibitions', [ExhibitionController::class, 'store'], ['auth']);
+$router->get('/exhibitions/{id}', [ExhibitionController::class, 'show'], ['auth']);
+$router->post('/exhibitions/{id}/items', [ExhibitionController::class, 'addItem'], ['auth']);
+$router->post('/exhibitions/{id}/publish', [ExhibitionController::class, 'publish'], ['auth']);
+$router->post('/exhibitions/{id}/offline', [ExhibitionController::class, 'offline'], ['auth']);
+$router->get('/notifications', [NotificationController::class, 'index'], ['auth']);
+$router->post('/notifications/read-all', [NotificationController::class, 'markAllRead'], ['auth']);
+$router->post('/notifications/{id}/read', [NotificationController::class, 'markRead'], ['auth']);
+$router->post('/notifications/preferences', [NotificationController::class, 'savePreference'], ['auth']);
 
 // 阶段 D：数字档案馆（家族资源统一走 ArchiveService + Policy）
 $router->get('/families/{id}/archives', [ArchiveController::class, 'index'], ['auth']);
