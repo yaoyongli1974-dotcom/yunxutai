@@ -29,6 +29,7 @@ final class InstitutionService
         if ((int) Db::value('SELECT COUNT(*) FROM institutions WHERE slug = ?', [$slug]) > 0) {
             throw new HttpException(409, '机构标识已被使用');
         }
+        $id = Db::transaction(function () use ($user, $name, $slug, $config): int {
         $id = Db::insert('institutions', [
             'name' => $name,
             'slug' => $slug,
@@ -43,6 +44,8 @@ final class InstitutionService
             'status' => 'active',
         ]);
         Audit::log('institution.created', 'institution', $id, ['slug' => $slug], (int) $user['id']);
+        return $id;
+        });
         return $id;
     }
 
@@ -73,6 +76,13 @@ final class InstitutionService
         if ((int) Db::value('SELECT COUNT(*) FROM institution_members WHERE institution_id = ? AND user_id = ? AND status = ?', [$institutionId, $targetUserId, 'active']) === 0) {
             throw new HttpException(422, '该用户不是机构成员');
         }
+        if ($role !== 'owner') {
+            $owners = (int) Db::value("SELECT COUNT(*) FROM institution_members WHERE institution_id = ? AND role = 'owner' AND status = 'active'", [$institutionId]);
+            $isOwner = (int) Db::value("SELECT COUNT(*) FROM institution_members WHERE institution_id = ? AND user_id = ? AND role = 'owner' AND status = 'active'", [$institutionId, $targetUserId]);
+            if ($owners <= 1 && $isOwner >= 1) {
+                throw new HttpException(422, '不能降级最后一个机构所有者');
+            }
+        }
         Db::update('institution_members', ['role' => $role], 'institution_id = ? AND user_id = ?', [$institutionId, $targetUserId]);
         Audit::log('institution.role_changed', 'institution', $institutionId, [
             'user_id' => $targetUserId, 'role' => $role,
@@ -89,14 +99,18 @@ final class InstitutionService
         if ((int) Db::value('SELECT COUNT(*) FROM families WHERE id = ?', [$familyId]) === 0) {
             throw new HttpException(404, '家族不存在');
         }
-        Db::query(
-            'INSERT INTO family_institutions (family_id, institution_id, created_at) VALUES (?, ?, NOW())
-             ON DUPLICATE KEY UPDATE institution_id = VALUES(institution_id)',
-            [$familyId, $institutionId]
-        );
-        Audit::log('institution.family_attached', 'family', $familyId, [
-            'institution_id' => $institutionId,
-        ], (int) $user['id']);
+        Db::transaction(function () use ($institutionId, $familyId, $user): void {
+            $current = (int) Db::value('SELECT COUNT(*) FROM family_institutions WHERE family_id = ?', [$familyId]);
+            if ($current >= 1) {
+                throw new HttpException(409, '家族已归属其他机构');
+            }
+            Db::query(
+                'INSERT INTO family_institutions (family_id, institution_id, created_at) VALUES (?, ?, NOW())',
+                [$familyId, $institutionId]
+            );
+            Audit::log('institution.family_attached', 'family', $familyId, ['institution_id' => $institutionId], (int) $user['id']);
+        });
+        return;
     }
 
     public static function institutionOfFamily(int $familyId): ?array

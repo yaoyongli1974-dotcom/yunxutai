@@ -12,6 +12,20 @@ use App\Core\Response;
  */
 final class Api
 {
+    /** @param list<mixed> $items */
+    public static function paged(array $items, int $page, int $perPage, int $total): Response
+    {
+        return self::ok([
+            'items' => $items,
+            'pagination' => [
+                'page' => $page,
+                'per_page' => $perPage,
+                'total' => $total,
+                'total_pages' => $perPage > 0 ? (int) ceil($total / $perPage) : 0,
+            ],
+        ]);
+    }
+
     public static function ok(array $data, int $status = 200): Response
     {
         return Response::json(['data' => $data], $status);

@@ -3255,6 +3255,67 @@ test('Round2 E04：分段修正、审核与导出仅含已确认内容', functio
     check($export['status'] === 200 && str_contains($export['raw'], '人工修正稿'), '导出应包含已确认的修正稿');
 });
 
+echo "\n[Round2 Phase 4：API 标准化 / 标注 / 机构边界]\n";
+
+test('Round2 G03：统一分页结构', function (): void {
+    $res = \App\Api\Api::paged([['id' => 1], ['id' => 2]], 2, 10, 25);
+    $data = json_decode($res->body(), true);
+    check(is_array($data), '分页响应应为 JSON');
+    check(count($data['data']['items'] ?? []) === 2, 'items 缺失');
+    check(($data['data']['pagination']['page'] ?? 0) === 2, 'page 错误');
+    check(($data['data']['pagination']['per_page'] ?? 0) === 10, 'per_page 错误');
+    check(($data['data']['pagination']['total'] ?? 0) === 25, 'total 错误');
+    check(($data['data']['pagination']['total_pages'] ?? 0) === 3, 'total_pages 错误');
+});
+
+test('Round2 H03：照片标注人物必须属于同一家族', function (): void {
+    $ownerA = make_family_user('p4-tag-a');
+    $ownerB = make_family_user('p4-tag-b');
+    $familyA = \App\Services\FamilyService::create($ownerA, '标注家族A', 'p4-tag-a-' . bin2hex(random_bytes(3)));
+    $familyB = \App\Services\FamilyService::create($ownerB, '标注家族B', 'p4-tag-b-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($ownerA, $familyA, ['title' => '标注档案', 'privacy' => 'private']);
+    $personB = \App\Services\FamilyPersonService::create($ownerB, $familyB, [
+        'name' => '他族人物', 'privacy' => 'private', 'death_date' => '1990-01-01',
+    ]);
+    $tmp = sys_get_temp_dir() . '/p4-tag-' . bin2hex(random_bytes(4)) . '.png';
+    file_put_contents($tmp, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', true));
+    login((string) $ownerA['email'], 'FamilyTest@123');
+    http('POST', '/archives/' . $archiveId . '/files', ['_token' => csrf_token('/archives/' . $archiveId)], ['file' => $tmp], false);
+    $fileId = (int) Db::value('SELECT id FROM archive_files WHERE archive_id = ? LIMIT 1', [$archiveId]);
+    try {
+        \App\Services\ArchiveService::addPhotoTag($ownerA, $fileId, $personB, 10, 10, 20, 20);
+        check(false, '跨家族人物不得标注到本家族档案');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 404, '跨家族标注应 404');
+    }
+    check(db_count('archive_photo_tags', 'archive_file_id = ?', [$fileId]) === 0, '不应写入跨家族标注');
+    @unlink($tmp);
+});
+
+test('Round2 I：机构事务一致性、最后 owner 与重复归属', function (): void {
+    $admin = Db::fetch("SELECT * FROM users WHERE email = 'admin@example.com' LIMIT 1");
+    check(is_array($admin), '测试管理员不存在');
+    $instId = \App\Services\InstitutionService::create($admin, '边界机构', 'p4-inst-' . bin2hex(random_bytes(3)));
+    check(db_count('institutions', 'id = ? AND status = ?', [$instId, 'active']) === 1, '机构创建失败');
+    check(count(array_filter(\App\Services\InstitutionService::members($instId), fn ($m) => $m['role'] === 'owner')) === 1, 'owner 成员缺失');
+    try {
+        \App\Services\InstitutionService::setRole($admin, $instId, (int) $admin['id'], 'member');
+        check(false, '最后一个 owner 不应被降级');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 422, '降级最后 owner 应 422');
+    }
+    $user = make_family_user('p4-inst-family');
+    $familyId = \App\Services\FamilyService::create($user, '机构家族', 'p4-inst-family-' . bin2hex(random_bytes(3)));
+    \App\Services\InstitutionService::attachFamily($admin, $instId, $familyId);
+    check((int) \App\Services\InstitutionService::institutionOfFamily($familyId)['id'] === $instId, '家族归属未建立');
+    try {
+        \App\Services\InstitutionService::attachFamily($admin, $instId, $familyId);
+        check(false, '重复归属应拒绝');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 409, '重复归属应 409');
+    }
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

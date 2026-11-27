@@ -316,8 +316,9 @@ final class ArchiveService
         }
         $familyId = (int) $archive['family_id'];
         Policy::require('archive.tag', ['family_id' => $familyId], $user);
-        if (FamilyPersonService::getVisible($user, $personId) === null) {
-            throw new HttpException(404, '人物不存在或无权访问');
+        $person = FamilyPersonService::getVisible($user, $personId);
+        if ($person === null || (int) ($person['family_id'] ?? 0) !== $familyId) {
+            throw new HttpException(404, '人物不存在或不属于该家族');
         }
         foreach (['x' => $x, 'y' => $y, 'w' => $w, 'h' => $h] as $key => $value) {
             if ($value < 0 || $value > 100 || ($key !== 'x' && $key !== 'y' && $value <= 0)) {
