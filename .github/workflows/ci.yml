@@ -27,9 +27,6 @@ jobs:
           MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
           MYSQL_DATABASE: jidian_test
         ports: ['3306:3306']
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot"
-          --health-interval=10s --health-timeout=5s --health-retries=10
     env:
       DB_HOST: 127.0.0.1
       DB_PORT: 3306
@@ -59,6 +56,22 @@ jobs:
 
       - name: Install system tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Wait for database (works for MySQL and MariaDB)
+        run: |
+          php -r '
+          for ($i = 0; $i < 90; $i++) {
+            try {
+              new PDO("mysql:host=127.0.0.1;port=3306;dbname=jidian_test;charset=utf8mb4", "root", "", [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+              echo "database ready\n";
+              exit(0);
+            } catch (Throwable $e) {
+              sleep(1);
+            }
+          }
+          fwrite(STDERR, "database not ready\n");
+          exit(1);
+          '
 
       - name: PHP syntax check
         run: find app bin database tests config public -name '*.php' -print0 | xargs -0 -n1 php -l
