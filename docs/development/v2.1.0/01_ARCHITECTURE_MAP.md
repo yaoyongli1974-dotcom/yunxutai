@@ -95,7 +95,7 @@ CLI 入口：`bin/ai-worker.php`（旧 AI 任务）、`bin/ai-workflow-worker.ph
 | `Policy` | `memberRole` (:11)、`role` (:27)、`canView` (:38)、`canEdit/canManage/canModerate/canPost` (:54/:63/:68/:73)、`canViewMedia` (:87)、`isIndexable` (:98)、`FAMILY_ROLES/CAPABILITIES` (:108/:111)、`familyRole` (:146)、`can` (:170)、`require` (:226，拒绝→404)、`canViewResource` (:236，白名单 `RESOURCE_TABLES` :137)、`clearCache` (:294) | 统一资源授权与家族能力映射 |
 | `Db` | `query/fetch/fetchAll/value` (:31/:38/:44/:49)、`insert/update` (:55/:68，列白名单 :99)、`transaction()` (:82) | PDO 封装 |
 | `Storage` | `uploadsPath` (:8)、`storeUpload` (:19)、`storeArchiveUpload` (:83)、`storeVerificationDocument` (:162)、`storeGeneratedBytes/File` (:246/:272)、`delete/absolute` (:285/:300) | 文件落盘、MIME 白名单、随机名、0640、SHA-256、JPEG 重编码 |
-| `MediaSign` | `url()` (:16，默认 900s)、`verify()` (:22，HMAC-SHA256 `media:{id}:{exp}`，`hash_equals`) | 签名媒体 URL |
+| `MediaSign` | `url()`（默认 300s，含 visibility）、`verify()`（HMAC-SHA256 `media:{id}:{exp}:{visibility}`，`hash_equals`） | 签名媒体 URL，绑定可见性 |
 | `Request/Response` | `fromGlobals/input/raw/int/bool/file/ip/header` (:18-83)；`html/text/json/redirect/file` (:17-50)、`withHeader/status/body/send` (:52-83) | HTTP 抽象；`ip()` 仅取 `REMOTE_ADDR` (:73-77) |
 | `Audit` | `log()` (:8，写 `audit_logs`，IP 哈希，失败仅 error_log) | 审计事件 |
 | `Settings` | 白名单 (:15-42)、`load()` (:53，DB 覆盖 config)、`get/set/all/reset` (:120/:133/:152/:159) | AI/平台设置 |
@@ -145,7 +145,7 @@ CLI 入口：`bin/ai-worker.php`（旧 AI 任务）、`bin/ai-workflow-worker.ph
 访问(Web): GET /media/{id} → Policy::canViewMedia → Storage::absolute → Response::file
 访问(API): GET /api/v1/media/{id}?exp=&sig= → MediaSign::verify → 仅检查 status=active（无 Policy 复核）
 ```
-签名 URL 仅绑定 `(id, exp)`，TTL 900s；`APP_KEY` 缺失时回退到字面量 `dev-only-key-change-before-production`（CONFIRMED，见风险 C-02）。
+Phase B 前签名 URL 仅绑定 `(id, exp)`，TTL 900s；`APP_KEY` 缺失时回退到字面量 `dev-only-key-change-before-production`（CONFIRMED，见风险 C-02）。Phase B 后已改为绑定可见性、TTL 300s，且非 local/testing 环境禁止占位密钥。
 
 ### 5.4 归档与删除
 ```

@@ -51,8 +51,9 @@ if (PHP_SAPI !== 'cli') {
     // 不暴露 PHP 版本（等价 php.ini expose_php=Off，且无需重启 FPM）。
     header_remove('X-Powered-By');
 
+    // 仅可信反向代理的 X-Forwarded-Proto 才参与 secure 判定，避免客户端伪造头绕过 HTTPS cookie 保护。
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+        || (config('app.trusted_proxy', false) && ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 
     session_name((string) config('security.session_name', 'jingsi_session'));
     session_set_cookie_params([

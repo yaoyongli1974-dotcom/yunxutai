@@ -8,6 +8,7 @@ use App\Api\ApiException;
 use App\Api\Input;
 use App\Api\Presenter;
 use App\Core\Audit;
+use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Notify;
 use App\Core\Policy;
@@ -66,12 +67,13 @@ final class MemberController extends BaseController
         $role = Input::string($request, 'role');
 
         $fields = [];
-        if ($email !== '') {
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $fields['email'] = '邮箱格式不正确';
-            } elseif (mb_strlen($email) > 190) {
-                $fields['email'] = '邮箱长度不能超过 190 个字符';
-            }
+        if ($email === '') {
+            // 纪念馆邀请必须绑定受邀邮箱，空邮箱无法在接受时校验身份。
+            $fields['email'] = '邮箱不能为空';
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $fields['email'] = '邮箱格式不正确';
+        } elseif (mb_strlen($email) > 190) {
+            $fields['email'] = '邮箱长度不能超过 190 个字符';
         }
         if (!in_array($role, self::ROLES, true)) {
             $fields['role'] = '角色只能是协作者或亲友';
@@ -157,6 +159,8 @@ final class MemberController extends BaseController
         }
 
         Member::updateRole((int) $member['id'], $role);
+        Auth::clear();
+        Policy::clearCache();
         Audit::log('member.update_role', 'memorial_member', (int) $member['id'], [
             'memorial_id' => (int) $memorial['id'],
             'from' => $member['role'],
@@ -185,6 +189,8 @@ final class MemberController extends BaseController
         }
 
         Member::revoke((int) $member['id']);
+        Auth::clear();
+        Policy::clearCache();
         Audit::log('member.revoke', 'memorial_member', (int) $member['id'], [
             'memorial_id' => (int) $memorial['id'],
             'user_id' => (int) $member['user_id'],
@@ -210,6 +216,8 @@ final class MemberController extends BaseController
         }
 
         Invitation::revoke((int) $invitation['id'], (int) $memorial['id']);
+        Auth::clear();
+        Policy::clearCache();
         Audit::log('invitation.revoke', 'invitation', (int) $invitation['id'], [
             'memorial_id' => (int) $memorial['id'],
         ]);

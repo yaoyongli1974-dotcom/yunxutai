@@ -102,7 +102,9 @@ final class Presenter
             'visibility' => (string) $media['visibility'],
             'created_at' => $media['created_at'] ?? null,
             // 小程序无法携带网页 session，统一走签名直链；未就绪时降级为 null。
-            'media_url' => class_exists(MediaSign::class) ? MediaSign::url((int) $media['id']) : null,
+            'media_url' => class_exists(MediaSign::class)
+                ? MediaSign::url((int) $media['id'], MediaSign::DEFAULT_TTL, (string) ($media['visibility'] ?? 'visitors'))
+                : null,
         ];
     }
 

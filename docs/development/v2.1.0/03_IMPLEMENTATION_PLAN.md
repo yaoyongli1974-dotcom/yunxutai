@@ -89,3 +89,13 @@
 **回滚通用策略**：每个 Phase 单独提交；数据库变更仅新增 Migration，不改已发布迁移；保留旧字段/旧 Token 的过渡兼容窗口；配置类改动可在部署层回退；不可预测的批量数据操作先备份再执行并提供补偿脚本。
 
 **下一步**：等待项目负责人确认 Phase 0 四份文档与风险等级，尤其是 `00_BASELINE_AUDIT.md` §10 的五项人工决策，再开始 Phase B。
+
+---
+
+## Phase B 执行记录（已完成）
+
+- 人工批准已收到；采用可逆默认：媒体缓存 `no-store`；归档清理与版本决策留到 C/E；API Session 项因复核确认无 Web 回退而取消。
+- B1–B6 及 N-01~N-04 全部完成；新增迁移 `20261128_001_invitation_token_hash.php`。
+- 回归：PHP lint / composer validate / PHPStan / secret-scan / JS check / migration status+repeat / doctor / `git diff --check` 均 rc=0；`bash bin/test.sh` 133 通过 / 0 失败（原 128 + 新增 5）。
+- 阶段报告：`10_SECURITY_FIX_REPORT.md`、`11_AUTHORIZATION_TEST_REPORT.md`、`12_MEDIA_SECURITY_REPORT.md`；风险登记册已追加 Phase B 处置结果。
+- 门禁：Phase B 全部通过，进入 Phase C；未 push main，未发 Release，未动生产。

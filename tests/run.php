@@ -3366,6 +3366,135 @@ test('代码审查：Db 拒绝非法列名', function (): void {
     check($rejected, 'Db::update 必须校验列名');
 });
 
+echo "\n[Phase B 安全回归]\n";
+
+test('B-R01：非 local/testing 环境使用占位 APP_KEY 时配置加载失败', function (): void {
+    $php = escapeshellarg(PHP_BINARY);
+    $cmd = 'cd ' . escapeshellarg(BASE_PATH) . ' && APP_ENV=production APP_KEY= ' . $php . ' -r '
+        . escapeshellarg('define("BASE_PATH", getcwd()); require "config/config.php"; echo "loaded";') . ' 2>&1';
+    $out = [];
+    $rc = 0;
+    exec($cmd, $out, $rc);
+    check($rc !== 0, '生产环境使用空 APP_KEY 应 fail-closed');
+    check(str_contains(implode("\n", $out), 'APP_KEY'), '错误信息应指出 APP_KEY');
+});
+
+test('B-B1/B5：签名媒体绑定可见性，私有响应 no-store', function (): void {
+    $detail = api('GET', '/api/v1/memorials/zhang-mingyuan');
+    $mediaList = $detail['data']['data']['media'] ?? [];
+    check(is_array($mediaList) && $mediaList !== [], '前置：详情应含媒体');
+    $item = $mediaList[0];
+    $url = (string) ($item['media_url'] ?? '');
+    check(str_contains($url, 'sig='), '应返回签名 URL');
+
+    reset_session();
+    $ok = http('GET', $url, null, [], false);
+    check($ok['status'] === 200, '有效签名应返回 200');
+    check(str_contains($ok['headers'], 'no-store'), '私有媒体响应应 no-store');
+
+    $mediaId = (int) $item['id'];
+    $originalVisibility = (string) ($item['visibility'] ?? 'visitors');
+    Db::update('media', ['visibility' => 'members'], 'id = ?', [$mediaId]);
+    try {
+        $denied = http('GET', $url, null, [], false);
+        check($denied['status'] === 404, '可见性下调后旧签名应失效（404）');
+    } finally {
+        Db::update('media', ['visibility' => $originalVisibility], 'id = ?', [$mediaId]);
+    }
+});
+
+test('B-R02：纪念馆邀请仅限受邀邮箱本人，空邮箱邀请被拒绝', function (): void {
+    $ownerToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => 'demo@example.com', 'password' => 'Demo@123456',
+    ]));
+    check($ownerToken !== '', '前置：馆主应可登录');
+    $memorialId = (int) Db::value('SELECT id FROM memorials WHERE slug = ?', ['zhang-mingyuan']);
+    $invitee = make_family_user('b-invitee');
+    $other = make_family_user('b-other');
+
+    $invite = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/invite', [
+        'email' => $invitee['email'], 'role' => 'viewer',
+    ], $ownerToken);
+    check($invite['status'] === 201, '邀请应创建成功');
+    $inviteUrl = (string) ($invite['data']['data']['invite_url'] ?? '');
+    $token = basename((string) (parse_url($inviteUrl, PHP_URL_PATH) ?: ''));
+    check($token !== '', '应返回邀请链接');
+
+    login((string) $other['email'], 'FamilyTest@123');
+    $csrf = csrf_token('/invitations/' . $token);
+    $denied = http('POST', '/invitations/' . $token, ['_token' => $csrf]);
+    check($denied['status'] === 404, '非受邀用户接受应 404');
+
+    login((string) $invitee['email'], 'FamilyTest@123');
+    $csrf = csrf_token('/invitations/' . $token);
+    $accepted = http('POST', '/invitations/' . $token, ['_token' => $csrf]);
+    check($accepted['status'] === 200, '受邀邮箱本人应接受成功');
+
+    $empty = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/invite', [
+        'email' => '', 'role' => 'viewer',
+    ], $ownerToken);
+    check($empty['status'] === 422, '空邮箱邀请应 422');
+});
+
+test('B-R12：修改密码后旧 API Token 立即失效', function (): void {
+    $user = make_family_user('b-pwd');
+    $email = (string) $user['email'];
+    $oldToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => $email, 'password' => 'FamilyTest@123',
+    ]));
+    check($oldToken !== '', '前置：应能换取 token');
+
+    login($email, 'FamilyTest@123');
+    $csrf = csrf_token('/account?tab=security');
+    $changed = http('POST', '/account/password', [
+        '_token' => $csrf,
+        'current_password' => 'FamilyTest@123',
+        'password' => 'Changed@123456',
+        'password_confirmation' => 'Changed@123456',
+    ]);
+    check($changed['status'] === 200, '修改密码应成功');
+
+    check(api('GET', '/api/v1/me', null, $oldToken)['status'] === 401, '旧 token 应失效');
+    $newToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => $email, 'password' => 'Changed@123456',
+    ]));
+    check($newToken !== '', '新密码应可换取 token');
+    check(api('GET', '/api/v1/me', null, $newToken)['status'] === 200, '新 token 应可用');
+});
+
+test('B-R03：撤回授权后 AI 任务不再执行，失败任务不复活', function (): void {
+    $owner = make_family_user('b-consent');
+    $familyId = \App\Services\FamilyService::create($owner, '同意复核家族', 'b-consent-' . bin2hex(random_bytes(3)));
+    $sessionId = \App\Services\AiWorkflowService::createOralSession($owner, $familyId, [
+        'title' => '授权复核', 'topic' => '测试',
+    ]);
+    \App\Services\AiWorkflowService::setConsent($owner, $sessionId, true);
+    $workflowId = \App\Services\AiWorkflowService::create(
+        $owner, $familyId, 'extract_facts',
+        ['session_id' => $sessionId, 'text' => '家族记忆资料'],
+        'b-consent-' . $sessionId
+    );
+    \App\Services\AiWorkflowService::setConsent($owner, $sessionId, false);
+
+    try {
+        \App\Services\AiWorkflowService::process($workflowId, 'b-test-worker');
+        check(false, '撤回授权后不应继续执行');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 422, '应返回 422');
+    }
+    $row = Db::fetch('SELECT status, failure_class, retry_count, max_retries FROM ai_workflows WHERE id = ?', [$workflowId]);
+    check($row !== null, '工作流应存在');
+    check((string) $row['failure_class'] === 'input_error', '应归类为 input_error');
+    check((int) $row['retry_count'] >= (int) $row['max_retries'], '不应继续重试');
+
+    Db::update('ai_workflows', ['status' => 'failed', 'retry_count' => 0], 'id = ?', [$workflowId]);
+    \App\Services\AiWorkflowService::revokeSessionConsent($owner, $sessionId);
+    check(
+        (string) Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$workflowId]) === 'cancelled',
+        'failed 工作流也应在撤回授权时取消'
+    );
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

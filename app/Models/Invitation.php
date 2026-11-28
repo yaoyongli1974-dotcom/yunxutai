@@ -16,6 +16,8 @@ final class Invitation
             'email' => $email ?: null,
             'role' => $role,
             'token' => $token,
+            // 明文仅供存量视图渲染邀请链接；校验一律使用散列值。
+            'token_hash' => hash('sha256', $token),
             'created_by' => $createdBy,
             'expires_at' => date('Y-m-d H:i:s', time() + $days * 86400),
         ]);
@@ -24,15 +26,19 @@ final class Invitation
 
     public static function findOpenByToken(string $token): ?array
     {
-        return Db::fetch(
-            "SELECT i.*, m.slug, m.title, m.created_by, d.full_name
+        $select = "SELECT i.*, m.slug, m.title, m.created_by, d.full_name
              FROM invitations i
              JOIN memorials m ON m.id = i.memorial_id
              JOIN deceased d ON d.id = m.deceased_id
-             WHERE i.token = ? AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > NOW()
-             LIMIT 1",
-            [$token]
-        );
+             WHERE %s AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > NOW()
+             LIMIT 1";
+
+        $invitation = Db::fetch(sprintf($select, 'i.token_hash = ?'), [hash('sha256', $token)]);
+        if ($invitation !== null) {
+            return $invitation;
+        }
+        // 兼容迁移前只存明文 token 的存量邀请；新邀请的 token_hash 已写入，不再按明文命中。
+        return Db::fetch(sprintf($select, 'i.token_hash IS NULL AND i.token = ?'), [$token]);
     }
 
     public static function pendingFor(int $memorialId): array

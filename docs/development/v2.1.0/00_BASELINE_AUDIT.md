@@ -59,7 +59,7 @@
 - 56 张表；关键约束包括 `families.uq_family_slug`（`database/schema.sql:448-466`）、`family_members.uq_family_user` (`:469-485`)、`family_persons.deleted_at/verification_status` (`:510-533`)、`person_memorial_links.uq_person_memorial` (`:536-553`)、`archives.status/deleted_at` (`:633-654`)、`archive_files.uq_archive_storage_key/sha256` (`:657-672`)、`ai_*` 工作流与事实表 (`:728-862`)。
 - `Policy` 现有能力：`memberRole/role/canView/canEdit/canManage/canModerate/canPost/canViewMedia/isIndexable`（`app/Core/Policy.php:11-98`）；家族角色能力表 `FAMILY_ROLES/FAMILY_CAPABILITIES` (`:108-111`)、`familyRole/can/require/canViewResource/clearCache` (`:146-294`)。`require()` 拒绝时返回 404（`:226`）。
 - `ApiAuth::resolve()` 解析 Bearer Token 并调用 `Auth::setApiUser()` 注入（`app/Core/ApiAuth.php:41`，`app/Core/Auth.php:36`）。**CONFIRMED（本轮复核）**：API 中间件 `api-auth` 只接受 Bearer Token，失败返回 JSON 401（`app/Core/Router.php:97-99`），**不存在早期 Round2 报告所述的 Web Session 回退**；`api-admin` 中间件虽定义（`:100-104`）但当前路由未使用。以当前代码为准，不重做该历史问题。
-- 媒体签名：`MediaSign::url/verify()` 使用 `app.key` 对 `media:{id}:{exp}` 做 HMAC-SHA256，默认 900 秒（`app/Core/MediaSign.php:14-38`）。
+- 媒体签名（Phase B 后）：`MediaSign::url/verify()` 使用 `app.key` 对 `media:{id}:{exp}:{visibility}` 做 HMAC-SHA256，默认 300 秒，绑定可见性使授权下调后旧签名失效（`app/Core/MediaSign.php`）。
 
 ## 6. AI Worker 与并发现状（本轮 AI lane 已复核）
 

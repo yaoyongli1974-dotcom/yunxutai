@@ -25,7 +25,14 @@ final class RateLimiter
 
     public static function blocked(string $key, int $max): bool
     {
-        return Kv::counter()->count(hash('sha256', $key)) >= $max;
+        $key = hash('sha256', $key);
+        try {
+            return Kv::counter()->count($key) >= $max;
+        } catch (\Throwable $e) {
+            // 与 hit() 一致：限流存储故障时默认 fail-closed，拒绝本次请求。
+            error_log('[rate-limit] 存储异常，拒绝本次请求：' . $e->getMessage());
+            return true;
+        }
     }
 
     public static function clear(string $key): void

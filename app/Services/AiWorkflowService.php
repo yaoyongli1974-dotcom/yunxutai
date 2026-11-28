@@ -181,6 +181,25 @@ final class AiWorkflowService
         $recovered = 0;
         foreach ($expired as $row) {
             $id = (int) $row['id'];
+            if (self::consentRevokedForWorkflow($id)) {
+                $ok = Db::update('ai_workflows', [
+                    'status' => 'cancelled',
+                    'failure_class' => 'consent_revoked',
+                    'error_message' => '受访者已撤回授权，任务取消且不再重试',
+                    'last_error_at' => date('Y-m-d H:i:s'),
+                    'locked_by' => null,
+                    'lease_until' => null,
+                    'heartbeat_at' => null,
+                    'lock_version' => (int) $row['lock_version'] + 1,
+                ], "id = ? AND status = 'processing' AND lease_until IS NOT NULL AND lease_until < NOW()
+                    AND locked_by = ? AND lock_version = ?", [$id, (string) $row['locked_by'], (int) $row['lock_version']]);
+                if ($ok === 1) {
+                    Audit::log('ai.workflow.consent_revoked', 'ai_workflow', $id, [
+                        'previous_worker' => (string) $row['locked_by'],
+                    ]);
+                }
+                continue;
+            }
             $retry = min((int) $row['retry_count'] + 1, (int) Db::value('SELECT max_retries FROM ai_workflows WHERE id = ?', [$id]));
             $max = (int) Db::value('SELECT max_retries FROM ai_workflows WHERE id = ?', [$id]);
             $ok = Db::update('ai_workflows', [
@@ -210,6 +229,25 @@ final class AiWorkflowService
             "SELECT id, retry_count FROM ai_workflows WHERE status = 'failed' AND retry_count < max_retries AND run_after <= NOW()"
         );
         foreach ($failed as $row) {
+            if (self::consentRevokedForWorkflow((int) $row['id'])) {
+                $ok = Db::update(
+                    'ai_workflows',
+                    [
+                        'status' => 'cancelled',
+                        'failure_class' => 'consent_revoked',
+                        'error_message' => '受访者已撤回授权，任务取消且不再重试',
+                        'last_error_at' => date('Y-m-d H:i:s'),
+                        'locked_by' => null,
+                        'lease_until' => null,
+                    ],
+                    "id = ? AND status = 'failed' AND retry_count < max_retries",
+                    [(int) $row['id']]
+                );
+                if ($ok === 1) {
+                    Audit::log('ai.workflow.consent_revoked', 'ai_workflow', (int) $row['id'], []);
+                }
+                continue;
+            }
             $delay = min(60, 2 ** (int) $row['retry_count']);
             $ok = Db::update(
                 'ai_workflows',
@@ -247,6 +285,7 @@ final class AiWorkflowService
         $input = json_decode((string) $workflow['input_json'], true) ?: [];
         $familyId = (int) $workflow['family_id'];
         try {
+            self::assertRunAuthorized($type, $input, $familyId);
             $output = self::run($type, $input);
             Db::transaction(static function () use ($id, $output, $familyId, $workflow, $input, $workerId, $lockVersion): void {
                 if ($lockVersion !== null && !self::owns($id, $workerId, $lockVersion)) {
@@ -577,6 +616,37 @@ final class AiWorkflowService
         }
     }
 
+    /** 会话授权复核：仅带 session_id 的工作流受此授权通道约束；无法确认授权时一律视为已撤回。 */
+    private static function consentRevokedForWorkflow(int $id): bool
+    {
+        $workflow = self::find($id);
+        if ($workflow === null) {
+            return false;
+        }
+        $input = json_decode((string) $workflow['input_json'], true);
+        if (!is_array($input) || empty($input['session_id'])) {
+            return false; // 非会话工作流不受该授权通道影响
+        }
+        $session = self::session((int) $input['session_id']);
+        $status = $session === null ? '' : (string) ($session['consent_status'] ?? '');
+        return $status !== 'granted';
+    }
+
+    /** 执行前复核会话授权；抛 HttpException 以便被 process() 归类为 input_error 且不重试。 */
+    private static function assertRunAuthorized(string $type, array $input, ?int $familyId = null): void
+    {
+        if (empty($input['session_id'])) {
+            return;
+        }
+        $session = self::session((int) $input['session_id']);
+        if ($session === null || ($session['consent_status'] ?? '') !== 'granted') {
+            throw new HttpException(422, '受访者已撤回授权，任务不再执行');
+        }
+        if ($type === 'transcribe_audio' && $familyId !== null && (int) $session['family_id'] !== $familyId) {
+            throw new HttpException(404, '采访不存在或不属于该家族');
+        }
+    }
+
     private static function run(string $type, array $input): array
     {
         $text = trim((string) ($input['text'] ?? ''));
@@ -741,7 +811,7 @@ final class AiWorkflowService
         self::setConsent($user, $sessionId, false);
         Db::query(
             "UPDATE ai_workflows SET status = 'cancelled', locked_by = NULL, lease_until = NULL
-             WHERE family_id = ? AND status IN ('queued','processing')
+             WHERE family_id = ? AND status IN ('queued','processing','failed')
                AND JSON_EXTRACT(input_json, '$.session_id') = ?",
             [(int) $session['family_id'], $sessionId]
         );

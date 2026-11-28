@@ -84,6 +84,12 @@ final class InvitationController
         }
 
         $user = Auth::user();
+        // 纪念馆邀请同样必须是受邀邮箱本人：与家族邀请保持一致，防止令牌被转手使用。
+        $inviteEmail = strtolower(trim((string) ($invitation['email'] ?? '')));
+        if ($inviteEmail === '' || strtolower(trim((string) ($user['email'] ?? ''))) !== $inviteEmail) {
+            throw new HttpException(404, '邀请不存在或已失效');
+        }
+
         Member::upsert((int) $invitation['memorial_id'], (int) $user['id'], (string) $invitation['role'], (int) $invitation['created_by']);
         Invitation::accept((int) $invitation['id'], (int) $user['id']);
         Policy::clearCache();

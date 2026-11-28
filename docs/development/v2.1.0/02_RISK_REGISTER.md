@@ -87,3 +87,24 @@
 3. 不得通过删除测试、降低 PHPStan level、扩大 baseline/allowlist、缩矩阵、吞异常或虚假成功来消除风险。
 4. 每项修复需在 `03_IMPLEMENTATION_PLAN.md` 中有对应测试、验收标准与回滚方案。
 5. R-04（归档物理删除时机）、N-10（生产配置）等涉及业务/法律判断的项，须人工确认后再实施。
+
+---
+
+## 4. Phase B 处置结果（2026-11-28）
+
+| ID | 处置 | 结果 | 证据 |
+|---|---|---|---|
+| R-01 | 已修复：APP_KEY fail-closed（含 APP_ENV 未设置）；签名绑定 visibility，TTL 300s；签名端点有身份时复核 Policy | PASS | `10_SECURITY_FIX_REPORT.md` B-1/B-2/B-10；`B-R01`、`B-B1/B5` |
+| R-02 | 已修复：token_hash 迁移 + 邮箱绑定 + 禁止空邮箱邀请 | PASS | `B-R02` |
+| R-03 | 已修复：执行前复核同意、撤销覆盖 failed、恢复不复活 | PASS | `B-R03` |
+| R-12 | 已修复：改密批量撤销 Token | PASS | `B-R12` |
+| R-13 | 已修复：每次尝试计 IP，成功清零 | PASS | 全量 133/0（无 429 回归） |
+| R-19 | 已修复：no-store, must-revalidate | PASS | `B-B1/B5` |
+| N-01 | 已修复：Auth::clear() + 角色/状态变更调用 | PASS（代码+全量测试） | Phase B 报告 |
+| N-02 | 已修复：可信代理开关 | PASS（代码） | 配置与 bootstrap |
+| N-03 | 已修复：blocked() fail-closed | PASS（代码），未做故障注入 | Phase C/E 环境验证 |
+| N-04 | 已修复：2FA UA/IP 绑定 | PASS（代码），未做跨 UA 自动化 | Phase E 环境验证 |
+| N-07 | 部分修复：可见性绑定 + TTL 300s + no-store；成员级撤销的 per-user 绑定未实现 | 残余风险 | `12_MEDIA_SECURITY_REPORT.md` §4 |
+| R-25/R-26 | 未修复，按计划进入 Phase D | OPEN | — |
+
+**Phase B 结论**：P0 全部关闭；P1 的 R-12/R-13 提前关闭。无测试删除、无门禁降级。

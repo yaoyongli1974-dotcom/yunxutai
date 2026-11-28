@@ -39,7 +39,7 @@ final class MediaController
 
         return Response::file($path, $media['mime'], 200, [
             'Content-Disposition' => sprintf("%s; filename=\"%s\"; filename*=UTF-8''%s", $disposition, $fallbackName, $encodedName),
-            'Cache-Control' => 'private, max-age=300',
+            'Cache-Control' => 'no-store, must-revalidate',
             'X-Content-Type-Options' => 'nosniff',
         ]);
     }
