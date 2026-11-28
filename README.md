@@ -1,4 +1,4 @@
-# 云叙台 YunXuTai v2.0.0
+# 云叙台 YunXuTai v2.0.1
 
 [![CI](https://github.com/yaoyongli1974-dotcom/yunxutai/actions/workflows/ci.yml/badge.svg)](https://github.com/yaoyongli1974-dotcom/yunxutai/actions/workflows/ci.yml)
 
@@ -70,6 +70,6 @@ php bin/ai-workflow-worker.php --limit=5 --max-runtime=300 --once
 常驻部署参考 `deploy/ai-workflow-worker.service`（systemd）。旧版 `bin/ai-worker.php` 仅处理现有 AiJob，不执行 2.0 工作流。
 
 ## 版本与许可
-当前版本：v2.0.0（Release 基于 `784bc2b`）。早期版本见 Releases：v1.0.0、v2.0.0-rc1。
+当前版本：v2.0.1（Release 基于 v2.0.1 tag）。历史版本见 Releases：v2.0.0（基于 `784bc2b`）、v2.0.0-rc1、v1.0.0。
 本仓库为专有/内部代码，仅公开审阅，详见 `LICENSE`；安全披露见 `SECURITY.md`。
 根目录 `需求.md` 为早期产品设计草稿，商业化设想不代表已实现功能。

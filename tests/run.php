@@ -3346,7 +3346,7 @@ test('Round2 J：档案版本事务与删除状态机', function (): void {
 test('页脚显示版本号印记', function (): void {
     $home = http('GET', '/');
     check_contains($home['body'], 'site-footer__version');
-    check_contains($home['body'], 'v2.0.0');
+    check_contains($home['body'], 'v2.0.1');
 });
 
 test('代码审查：Db 拒绝非法列名', function (): void {
