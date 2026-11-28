@@ -55,7 +55,7 @@
 
 ## 7. 剩余问题
 
-1. CI 注解：Node.js 20 deprecated（GitHub Actions runner 强制使用 Node.js 24）。非阻断警告，建议后续单独升级 checkout/setup-node/gitleaks action 或 transition 至 Node.js 24 支持版本；本专项未改动 CI workflow。
+1. CI 注解：Node.js 20 deprecated（GitHub Actions runner 强制使用 Node.js 24）。非阻断警告，本专项未改动 CI workflow；后续已单独升级三个 action 至 Node 24 运行时并验证注解清零，见 `05_NODE24_ACTION_UPGRADE.md`。
 2. 本地无 gitleaks 二进制、无 PHP 8.5 运行时；对应验证以 CI 实跑结果为准，未伪造本地结果。
 3. 本报告提交为纯文档提交，会再次触发 CI；最终代码状态以上述绿灯 run 及其后的文档 run 为准。
 

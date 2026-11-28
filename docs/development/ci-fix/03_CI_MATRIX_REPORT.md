@@ -73,7 +73,7 @@ PHP 8.5 未在本地安装（本地仅有 PHP 8.4 / 7.4），由 CI 矩阵实跑
 
 ## 6. 非阻断提示
 
-CI 出现 Node.js 20 deprecated 注解（actions/checkout@v4、actions/setup-node@v4、gitleaks action 被强制运行于 Node.js 24），属平台侧警告，不影响任何步骤结论，建议后续单独升级处理，不在本专项范围内。
+CI 出现 Node.js 20 deprecated 注解（actions/checkout@v4、actions/setup-node@v4、gitleaks action 被强制运行于 Node.js 24），属平台侧警告，不影响任何步骤结论，不在本专项范围内；后续已单独升级并消除，见 `05_NODE24_ACTION_UPGRADE.md`。
 
 ## 7. 结论
 
