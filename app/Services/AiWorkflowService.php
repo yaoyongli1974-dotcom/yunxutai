@@ -870,8 +870,8 @@ final class AiWorkflowService
         Db::query(
             "UPDATE ai_workflows SET status = 'cancelled', locked_by = NULL, lease_until = NULL
              WHERE family_id = ? AND status IN ('queued','processing','failed')
-               AND JSON_EXTRACT(input_json, '$.session_id') = ?",
-            [(int) $session['family_id'], $sessionId]
+               AND JSON_UNQUOTE(JSON_EXTRACT(input_json, '$.session_id')) = ?",
+            [(int) $session['family_id'], (string) $sessionId]
         );
         Audit::log('oral_history.consent_revoked', 'oral_history_session', $sessionId, [
             'family_id' => (int) $session['family_id'],

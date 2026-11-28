@@ -8,6 +8,8 @@
 - 本地数据库：`11.8.9-MariaDB-0+deb13u1`（CI 另覆盖 MySQL 8.4 / MariaDB 11 × PHP 8.4 / 8.5）。
 - 测试命令：`bash bin/test.sh`，日志 `/tmp/opencode/phase-e/integration2.log`。
 - PR 首轮 CI（run `46119366823`）在 gitleaks 步骤失败：PR 浅克隆中缺少 `b526132^` base commit，导致 `git log ... base^..head` 返回 unknown revision。修复为 `.github/workflows/ci.yml` 的 checkout 增加 `fetch-depth: 0`；未关闭扫描、未改 allowlist、未改门禁。
+- 第二轮 CI（run `46119538523`）在 PHP 8.5 的 PHPStan 步骤失败：`bin/restore-check.php` 的 `$argv/$argc` 在禁用 `register_argc_argv` 时可能未定义；已做本地归一化，未加 baseline、未降 level。
+- 第三轮 CI（run `46119843741`）在 MySQL 8.4 两组合的 B-R03 失败：`JSON_EXTRACT(input_json, '$.session_id') = ?` 对整型绑定在 MySQL 与 MariaDB 行为不一致；改为 `JSON_UNQUOTE(JSON_EXTRACT(...)) = ?` 并按字符串绑定，未改业务逻辑，本地 MariaDB 145/0 复验通过。
 -  harness 安全修复：`bin/test.sh` 强制 `TEST_DB` 以 `jidian_test` 开头，且服务器探测全部失败时直接 exit 1（R-22）。
 
 ## 2. 质量门禁（最终 HEAD）
