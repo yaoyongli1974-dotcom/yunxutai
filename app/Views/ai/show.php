@@ -55,7 +55,7 @@ $output = json_decode((string) ($workflow['output_json'] ?? ''), true) ?: [];
         <?php if (!empty($output['facts'])): ?>
             <h3>候选事实</h3>
             <?php foreach ($output['facts'] as $fact): ?>
-                <div class="notice-card"><p class="small"><?= e($fact['fact_type'] ?? '') ?> · <?= e($fact['source_type'] ?? '') ?> · 待审核</p><p><?= e($fact['fact_content'] ?? '') ?></p></div>
+                <div class="notice-card"><p class="small">AI 候选（非已核实事实） · <?= e($fact['fact_type'] ?? '') ?> · <?= e($fact['source_type'] ?? '') ?> · 待人工审核</p><p><?= e($fact['fact_content'] ?? '') ?></p></div>
             <?php endforeach; ?>
         <?php endif; ?>
     </section>

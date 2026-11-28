@@ -3582,14 +3582,17 @@ test('C2：AI 事实候选记录完整来源与主体字段', function (): void 
     $owner = make_family_user('c-fact');
     $familyId = \App\Services\FamilyService::create($owner, '事实来源家族', 'c-fact-' . bin2hex(random_bytes(3)));
     $personId = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '来源人物', 'is_deceased' => true]);
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, [
+        'title' => '事实来源档案', 'privacy' => 'private',
+    ]);
     $factId = \App\Services\AiWorkflowService::addFactCandidate(
         $owner, $familyId, 'date', '1990年3月迁往南方', 'ai_extraction',
-        null, $personId, 0.75, '原文：1990年3月迁往南方', 101, 202, 'person', $personId
+        $archiveId, $personId, 0.75, '原文：1990年3月迁往南方', $archiveId, null, 'person', $personId
     );
     $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
     check($fact !== null, '事实未入库');
     check((string) $fact['source_excerpt'] === '原文：1990年3月迁往南方', '来源摘录未写入');
-    check((int) $fact['source_archive_id'] === 101 && (int) $fact['source_version_id'] === 202, '来源档案/版本未写入');
+    check((int) $fact['source_archive_id'] === $archiveId, '来源档案未写入');
     check((string) $fact['subject_type'] === 'person' && (int) $fact['subject_id'] === $personId, '主体字段未写入');
     check((string) $fact['verification_status'] === 'pending', 'AI 事实不得自动确认');
 });
@@ -3966,6 +3969,86 @@ test('P2：执行期发现全局超时后停止且不写入步骤结果', functi
     check($after !== null && (string) $after['failure_class'] === 'workflow_timeout', '应记录超时失败分类');
     check((int) $after['retry_count'] >= (int) config('ai.max_retries', 3), '超时任务不得自动重试');
     check(db_count('ai_workflow_steps', "workflow_id = ? AND status = 'completed'", [$id]) === 0, '超时后不得写入已完成步骤');
+});
+
+echo "\n[Phase 3：AI 事实来源与可信度]\n";
+
+test('P3：AI 事实默认标记为 AI 推测并写入来源位置', function (): void {
+    $owner = make_family_user('p3-fact-kind');
+    $familyId = \App\Services\FamilyService::create($owner, '事实类型家族', 'p3-kind-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, [
+        'title' => '来源档案', 'privacy' => 'private',
+    ]);
+    $factId = \App\Services\AiWorkflowService::addFactCandidate(
+        $owner, $familyId, 'date', '1990年家族迁徙', 'ai_extraction',
+        null, null, 0.65, '档案摘录：1990年家族迁徙', $archiveId, null, 'family', $familyId
+    );
+    $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
+    check($fact !== null, '事实未入库');
+    check((string) $fact['fact_kind'] === 'ai_inferred', 'AI 提取必须标记为 ai_inferred');
+    check((string) $fact['review_status'] === 'pending', 'AI 事实不得自动审核通过');
+    check((string) $fact['source_location'] !== '', '应写入来源位置');
+    check((float) $fact['confidence'] < 1.0, 'AI 推测置信度不得为 1');
+
+    $rejected = false;
+    try {
+        \App\Services\AiWorkflowService::addFactCandidate(
+            $owner, $familyId, 'date', '伪造来源', 'ai_extraction',
+            999999, null, 0.5, null, 999999, null, 'family', $familyId
+        );
+    } catch (\App\Core\HttpException $e) {
+        $rejected = $e->getStatusCode() === 404;
+    }
+    check($rejected, '不属于本家族的来源档案必须被拒绝');
+});
+
+test('P3：人工审核事实写入版本、意见与修订历史', function (): void {
+    $owner = make_family_user('p3-review');
+    $familyId = \App\Services\FamilyService::create($owner, '事实审核家族', 'p3-review-' . bin2hex(random_bytes(3)));
+    $factId = \App\Services\AiWorkflowService::addFactCandidate(
+        $owner, $familyId, 'date', '1992年迁入南方', 'user_input',
+        null, null, 0.8, '用户口述', null, null, 'family', $familyId
+    );
+    \App\Services\AiWorkflowService::reviewFact($owner, $factId, 'approved', '已核对档案');
+    $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
+    check((string) $fact['verification_status'] === 'confirmed', '审核后应变为 confirmed');
+    check((string) $fact['review_status'] === 'approved', 'review_status 应为 approved');
+    check((int) $fact['version'] === 2, '版本应递增到 2');
+    check(db_count('ai_fact_revisions', 'fact_id = ?', [$factId]) === 1, '应保存一条审核前版本');
+
+    \App\Services\AiWorkflowService::reviewFact($owner, $factId, 'disputed', '发现矛盾，需修订');
+    $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
+    check((string) $fact['review_status'] === 'needs_revision', '争议应进入 needs_revision');
+    check((int) $fact['version'] === 3, '再次审核版本应递增到 3');
+    check(db_count('ai_fact_revisions', 'fact_id = ?', [$factId]) === 2, '修订历史应保留两条');
+});
+
+test('P3：事实审核完成后联动工作流审核步骤与生成日志', function (): void {
+    $owner = make_family_user('p3-sync');
+    $familyId = \App\Services\FamilyService::create($owner, '审核联动家族', 'p3-sync-' . bin2hex(random_bytes(3)));
+    $workflowId = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1995年家族聚会照片说明。',
+    ], 'p3-sync-key');
+    \App\Services\AiWorkflowService::process($workflowId, 'p3-worker');
+    $step = Db::fetch(
+        "SELECT * FROM ai_workflow_steps WHERE workflow_id = ? AND name = 'review_draft' LIMIT 1",
+        [$workflowId]
+    );
+    check($step !== null && (string) $step['status'] === 'awaiting_review', '审核步骤应处于待审核');
+    $factId = \App\Services\AiWorkflowService::addFactCandidate(
+        $owner, $familyId, 'date', '1995年家族聚会', 'ai_extraction',
+        null, null, 0.6, '候选摘录', null, null, 'family', $familyId, $workflowId
+    );
+    \App\Services\AiWorkflowService::reviewFact($owner, $factId, 'approved', '已核实');
+    $step = Db::fetch(
+        "SELECT * FROM ai_workflow_steps WHERE workflow_id = ? AND name = 'review_draft' LIMIT 1",
+        [$workflowId]
+    );
+    check((string) $step['status'] === 'approved', '无待审核事实后步骤应 approved');
+    check(
+        (string) Db::value('SELECT review_status FROM ai_generation_logs WHERE workflow_id = ? ORDER BY id DESC LIMIT 1', [$workflowId]) === 'confirmed',
+        '生成日志审核状态应同步 confirmed'
+    );
 });
 
 echo "\n========== 结果 ==========\n";

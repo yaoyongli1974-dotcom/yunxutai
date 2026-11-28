@@ -63,9 +63,18 @@ $familyId = (int) $family['id'];
     <section class="section section--tight">
         <h2>候选事实（待人工确认）</h2>
         <?php if ($facts === []): ?><div class="empty"><p>暂无候选事实。</p></div><?php endif; ?>
+        <?php
+        $factKindLabels = [
+            'user_provided' => '用户提供', 'family_verified' => '家族确认', 'archive_verified' => '档案核实',
+            'public_source' => '公开资料', 'ai_inferred' => 'AI 推测（待核实）', 'unknown' => '来源未知',
+        ];
+        $reviewLabels = [
+            'pending' => '待人工审核', 'approved' => '人工已确认', 'rejected' => '人工已驳回', 'needs_revision' => '需修订',
+        ];
+        ?>
         <?php foreach ($facts as $fact): ?>
             <div class="card" style="margin-bottom:.75rem;">
-                <p class="small muted"><?= e($fact['source_type']) ?> · <?= e($fact['verification_status']) ?> · 置信度 <?= e(number_format((float) $fact['confidence'], 2)) ?></p>
+                <p class="small muted"><?= e($factKindLabels[$fact['fact_kind'] ?? 'unknown'] ?? '来源未知') ?> · <?= e($reviewLabels[$fact['review_status'] ?? 'pending'] ?? '待人工审核') ?> · 置信度 <?= e(number_format((float) $fact['confidence'], 2)) ?></p>
                 <p><?= e($fact['fact_content']) ?></p>
                 <?php if (Policy::can('ai.result.review', ['family_id' => $familyId, 'family' => $family], Auth::user())): ?>
                     <form method="post" action="<?= e(url('/ai/facts/' . (int) $fact['id'] . '/review')) ?>" style="display:inline;">

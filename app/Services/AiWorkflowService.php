@@ -688,7 +688,8 @@ final class AiWorkflowService
         ?int $sourceArchiveId = null,
         ?int $sourceVersionId = null,
         ?string $subjectType = null,
-        ?int $subjectId = null
+        ?int $subjectId = null,
+        ?int $workflowId = null
     ): int {
         if (!in_array($sourceType, ['user_input', 'oral_history', 'archive_ocr', 'ai_extraction', 'family_confirmation', 'imported'], true)) {
             throw new HttpException(422, '未知的事实来源类型');
@@ -718,20 +719,57 @@ final class AiWorkflowService
             $subjectType = $personId !== null ? 'person' : 'family';
             $subjectId = $personId ?? $familyId;
         }
+        // 来源完整性：档案/版本必须真实存在且属于同家族，否则不得作为可信来源写入。
+        if ($sourceArchiveId !== null) {
+            $archive = Db::fetch('SELECT id FROM archives WHERE id = ? AND family_id = ? LIMIT 1', [$sourceArchiveId, $familyId]);
+            if ($archive === null) {
+                throw new HttpException(404, '来源档案不存在或不属于该家族');
+            }
+        }
+        if ($sourceVersionId !== null) {
+            $version = Db::fetch(
+                'SELECT v.id FROM archive_versions v INNER JOIN archives a ON a.id = v.archive_id
+                 WHERE v.id = ? AND a.family_id = ? LIMIT 1',
+                [$sourceVersionId, $familyId]
+            );
+            if ($version === null) {
+                throw new HttpException(404, '来源版本不存在或不属于该家族');
+            }
+        }
+        if ($workflowId !== null) {
+            $workflow = Db::fetch('SELECT id, family_id FROM ai_workflows WHERE id = ? LIMIT 1', [$workflowId]);
+            if ($workflow === null || (int) $workflow['family_id'] !== $familyId) {
+                throw new HttpException(404, '来源任务不存在或不属于该家族');
+            }
+        }
+        $factKind = match ($sourceType) {
+            'user_input', 'oral_history' => 'user_provided',
+            'family_confirmation' => 'family_verified',
+            'archive_ocr' => 'archive_verified',
+            'ai_extraction' => 'ai_inferred',
+            default => 'public_source',
+        };
+        $sourceLocation = $sourceExcerpt !== null && $sourceArchiveId !== null
+            ? 'archive:' . $sourceArchiveId . '/' . ($sourceVersionId ?? 'latest')
+            : null;
         $id = Db::insert('memory_facts', [
             'family_id' => $familyId,
             'person_id' => $personId,
             'fact_type' => mb_substr($factType, 0, 40),
             'fact_content' => mb_substr($content, 0, 2000),
             'source_type' => $sourceType,
+            'fact_kind' => $factKind,
             'source_id' => $sourceId,
             'source_archive_id' => $sourceArchiveId,
             'source_version_id' => $sourceVersionId,
             'source_excerpt' => $sourceExcerpt,
+            'source_location' => $sourceLocation,
             'subject_type' => $subjectType,
             'subject_id' => $subjectId,
+            'workflow_id' => $workflowId,
             'confidence' => max(0, min(0.999, $confidence)),
             'verification_status' => 'pending',
+            'review_status' => 'pending',
             'submitted_by' => (int) ($user['id'] ?? 0),
         ]);
         Audit::log('ai.fact.candidate', 'memory_fact', $id, ['family_id' => $familyId, 'source' => $sourceType], (int) ($user['id'] ?? 0));
@@ -746,41 +784,106 @@ final class AiWorkflowService
             $sql .= ' AND verification_status = ?';
             $params[] = $status;
         }
-        $sql .= ' ORDER BY id DESC LIMIT 200';
-        return Db::fetchAll($sql, $params);
+        $sql .= ' ORDER BY id DESC LIMIT 250';
+        $rows = Db::fetchAll($sql, $params);
+        return array_values(array_filter($rows, static function (array $row): bool {
+            $workflowId = (int) ($row['workflow_id'] ?? 0);
+            return $workflowId === 0 || !self::consentRevokedForWorkflow($workflowId);
+        }));
     }
 
-    public static function reviewFact(?array $user, int $factId, string $status): void
+    public static function reviewFact(?array $user, int $factId, string $status, string $note = ''): void
     {
-        if (!in_array($status, ['confirmed', 'disputed', 'rejected', 'pending'], true)) {
+        $map = [
+            'confirmed' => ['confirmed', 'approved'],
+            'approved' => ['confirmed', 'approved'],
+            'disputed' => ['disputed', 'needs_revision'],
+            'needs_revision' => ['disputed', 'needs_revision'],
+            'rejected' => ['rejected', 'rejected'],
+            'pending' => ['pending', 'pending'],
+        ];
+        if (!isset($map[$status])) {
             throw new HttpException(422, '无效的审核状态');
         }
+        [$verification, $review] = $map[$status];
         $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
         if ($fact === null) {
             throw new HttpException(404, '事实记录不存在');
         }
         Policy::require('ai.result.review', ['family_id' => (int) $fact['family_id'], 'resource' => null], $user);
+        $workflowId = (int) ($fact['workflow_id'] ?? 0);
+        if ($workflowId > 0 && self::consentRevokedForWorkflow($workflowId)) {
+            throw new HttpException(422, '受访者已撤回授权，不能审核该事实');
+        }
         $before = (string) $fact['verification_status'];
-        if ($before === $status) {
+        if ($before === $verification) {
             throw new HttpException(422, '状态未发生变化');
         }
-        if ($before === 'confirmed' && $status === 'rejected') {
+        if ($before === 'confirmed' && $verification === 'rejected') {
             throw new HttpException(422, '已确认事实不能直接驳回，请先标记为争议');
         }
-        if ($before === 'rejected' && $status === 'confirmed') {
+        if ($before === 'rejected' && $verification === 'confirmed') {
             throw new HttpException(422, '已驳回的事实需重新提交后再审核');
         }
-        $updated = Db::update('memory_facts', [
-            'verification_status' => $status,
-            'reviewed_by' => (int) ($user['id'] ?? 0),
-            'reviewed_at' => date('Y-m-d H:i:s'),
-        ], 'id = ? AND verification_status = ?', [$factId, $before]);
-        if ($updated !== 1) {
-            throw new HttpException(409, '事实状态已被其他审核修改，请刷新后重试');
-        }
+        $version = (int) ($fact['version'] ?? 1) + 1;
+        $note = mb_substr(trim($note), 0, 500);
+        $now = date('Y-m-d H:i:s');
+        Db::transaction(static function () use ($fact, $factId, $verification, $review, $note, $version, $before, $now, $user): void {
+            $updated = Db::update('memory_facts', [
+                'verification_status' => $verification,
+                'review_status' => $review,
+                'review_note' => $note !== '' ? $note : null,
+                'version' => $version,
+                'reviewed_by' => (int) ($user['id'] ?? 0),
+                'reviewed_at' => $now,
+            ], 'id = ? AND verification_status = ?', [$factId, $before]);
+            if ($updated !== 1) {
+                throw new HttpException(409, '事实状态已被其他审核修改，请刷新后重试');
+            }
+            Db::insert('ai_fact_revisions', [
+                'fact_id' => $factId,
+                'fact_content' => (string) $fact['fact_content'],
+                'verification_status' => $before,
+                'review_status' => (string) ($fact['review_status'] ?? 'pending'),
+                'review_note' => $fact['review_note'] ?? null,
+                'version' => $version - 1,
+                'actor_id' => (int) ($user['id'] ?? 0),
+            ]);
+        });
         Audit::log('ai.fact.reviewed', 'memory_fact', $factId, [
-            'family_id' => (int) $fact['family_id'], 'from' => $before, 'to' => $status,
+            'family_id' => (int) $fact['family_id'], 'from' => $before, 'to' => $verification,
+            'version' => $version,
         ], (int) ($user['id'] ?? 0));
+        if ($workflowId > 0) {
+            self::syncWorkflowReview($workflowId, $user);
+        }
+    }
+
+    /** 一个工作流的所有候选事实审核完毕后，推进其 awaiting_review 步骤。 */
+    private static function syncWorkflowReview(int $workflowId, ?array $user): void
+    {
+        $pending = (int) Db::value(
+            "SELECT COUNT(*) FROM memory_facts WHERE workflow_id = ? AND review_status = 'pending'",
+            [$workflowId]
+        );
+        if ($pending > 0) {
+            return;
+        }
+        $step = Db::fetch(
+            "SELECT id FROM ai_workflow_steps WHERE workflow_id = ? AND status = 'awaiting_review' ORDER BY step_no LIMIT 1",
+            [$workflowId]
+        );
+        if ($step === null) {
+            return;
+        }
+        $rejected = (int) Db::value(
+            "SELECT COUNT(*) FROM memory_facts WHERE workflow_id = ? AND review_status IN ('rejected','needs_revision')",
+            [$workflowId]
+        );
+        $final = $rejected > 0 ? 'rejected' : 'approved';
+        $logStatus = $rejected > 0 ? 'rejected' : 'confirmed';
+        self::reviewStep($user, (int) $step['id'], $final);
+        Db::update('ai_generation_logs', ['review_status' => $logStatus], 'workflow_id = ?', [$workflowId]);
     }
 
     public static function createOralSession(?array $user, int $familyId, array $data): int
