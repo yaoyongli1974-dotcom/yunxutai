@@ -3,6 +3,7 @@
 declare(strict_types=1);
 /**
  * 备份完整性核验（L-03）：按 manifest 校验各产物 sha256/bytes，解压 gz 确认含建表语句与数据行。
+ * 支持 AES-256-CBC 加密备份（manifest.encryption + key_fingerprint），密钥仅从环境变量 BACKUP_ENCRYPTION_KEY 读取。
  * 只读检查，不导入数据库。
  * 用法：php bin/restore-check.php <备份目录|backup.sql.gz>
  */
@@ -20,6 +21,9 @@ if (in_array('--help', $argv, true) || in_array('-h', $argv, true)) {
   备份目录（推荐）：读取 manifest.json，逐一核对 database.sql.gz /
   uploads.tar.gz / verifications.tar.gz 是否存在且 sha256、bytes 与
   manifest 一致，再解压 database.sql.gz 统计 CREATE TABLE / INSERT INTO。
+  加密备份：manifest 标注 encryption=aes-256-cbc 时，需设置环境变量
+  BACKUP_ENCRYPTION_KEY；先校验密文 sha256/bytes，再解密并按明文校验。
+  密钥不写入备份目录，错误密钥会导致校验失败。
   单文件 gz（旧版备份）：无 manifest 校验和可比，只检查 gzip 可读、
   含建表语句与数据行。
 
@@ -45,6 +49,8 @@ $reasons = [];
 $sha = 'n/a';
 $bytes = 0;
 
+$tempFiles = [];
+$resolved = [];
 if ($isDir) {
     $manifestPath = $target . '/manifest.json';
     if (!is_file($manifestPath)) {
@@ -55,6 +61,21 @@ if ($isDir) {
         if (!is_array($manifest)) {
             $reasons[] = 'manifest.json 无法解析';
         } else {
+            $encrypted = ($manifest['encryption'] ?? null) === 'aes-256-cbc';
+            $encKey = null;
+            if ($encrypted) {
+                $keyText = (string) (getenv('BACKUP_ENCRYPTION_KEY') ?: '');
+                if ($keyText === '') {
+                    $reasons[] = '备份已加密但未提供 BACKUP_ENCRYPTION_KEY';
+                } else {
+                    $encKey = hash('sha256', $keyText, true);
+                    $fingerprint = substr(hash('sha256', $keyText), 0, 16);
+                    if (!hash_equals((string) ($manifest['key_fingerprint'] ?? ''), $fingerprint)) {
+                        $reasons[] = 'BACKUP_ENCRYPTION_KEY 指纹不匹配（密钥错误）';
+                        $encKey = null;
+                    }
+                }
+            }
             $files = $manifest['files'] ?? null;
             if (!is_array($files) || !array_key_exists('database.sql.gz', $files)) {
                 $reasons[] = 'manifest.json 缺少 files.database.sql.gz 校验信息（旧版备份无可核验校验和）';
@@ -65,18 +86,58 @@ if ($isDir) {
                         $reasons[] = 'manifest 中产物名非法：' . $nameText;
                         continue;
                     }
-                    $path = $target . '/' . $name;
+                    $isEncrypted = $encrypted && is_array($meta) && ($meta['encrypted'] ?? false) === true;
+                    $path = $target . '/' . $name . ($isEncrypted ? '.enc' : '');
                     if (!is_file($path)) {
-                        $reasons[] = "缺少产物 {$name}";
+                        $reasons[] = "缺少产物 {$name}" . ($isEncrypted ? '.enc' : '');
                         continue;
                     }
-                    $actualSha = (string) hash_file('sha256', $path);
-                    $actualBytes = (int) filesize($path);
+                    $cipherSha = (string) hash_file('sha256', $path);
+                    $cipherBytes = (int) filesize($path);
+                    if ($isEncrypted) {
+                        $expectedCipherSha = is_string($meta['enc_sha256'] ?? null) ? $meta['enc_sha256'] : null;
+                        $expectedCipherBytes = is_numeric($meta['enc_bytes'] ?? null) ? (int) $meta['enc_bytes'] : null;
+                        if ($expectedCipherSha === null || !hash_equals(strtolower($expectedCipherSha), strtolower($cipherSha))) {
+                            $reasons[] = "{$name}.enc 密文 sha256 不匹配";
+                            continue;
+                        }
+                        if ($expectedCipherBytes !== $cipherBytes) {
+                            $reasons[] = "{$name}.enc 密文 bytes 不匹配";
+                            continue;
+                        }
+                        if ($encKey === null) {
+                            $reasons[] = "{$name} 无法解密（密钥缺失或错误）";
+                            continue;
+                        }
+                        $iv = base64_decode((string) ($meta['iv'] ?? ''), true);
+                        if ($iv === false || strlen($iv) !== 16) {
+                            $reasons[] = "{$name} IV 无效";
+                            continue;
+                        }
+                        $plain = openssl_decrypt((string) file_get_contents($path), 'aes-256-cbc', $encKey, OPENSSL_RAW_DATA, $iv);
+                        if ($plain === false) {
+                            $reasons[] = "{$name} 解密失败（密钥错误或密文损坏）";
+                            continue;
+                        }
+                        $tmp = @tempnam(sys_get_temp_dir(), 'yxt-restore-');
+                        if ($tmp === false || file_put_contents($tmp, $plain) === false) {
+                            $reasons[] = "{$name} 无法写入解密临时文件";
+                            continue;
+                        }
+                        $tempFiles[] = $tmp;
+                        $resolved[$nameText] = $tmp;
+                        $actualSha = hash('sha256', $plain);
+                        $actualBytes = strlen($plain);
+                    } else {
+                        $actualSha = $cipherSha;
+                        $actualBytes = $cipherBytes;
+                        $resolved[$nameText] = $path;
+                    }
                     $expectedSha = is_array($meta) && is_string($meta['sha256'] ?? null) ? $meta['sha256'] : null;
                     $expectedBytes = is_array($meta) && is_numeric($meta['bytes'] ?? null) ? (int) $meta['bytes'] : null;
                     $shaMatch = $expectedSha !== null && hash_equals(strtolower($expectedSha), strtolower($actualSha));
                     $bytesMatch = $expectedBytes !== null && $expectedBytes === $actualBytes;
-                    printf("  %s sha256=%s bytes=%d %s\n", $name, $actualSha, $actualBytes, ($shaMatch && $bytesMatch) ? 'OK' : 'FAILED');
+                    printf("  %s sha256=%s bytes=%d %s%s\n", $nameText, $actualSha, $actualBytes, ($shaMatch && $bytesMatch) ? 'OK' : 'FAILED', $isEncrypted ? ' (decrypted)' : '');
                     if (!$shaMatch) {
                         $reasons[] = $expectedSha === null ? "{$name} 缺少 sha256 基准" : "{$name} sha256 不匹配";
                     }
@@ -93,7 +154,7 @@ if ($isDir) {
             }
         }
     }
-    $dbPath = $target . '/database.sql.gz';
+    $dbPath = $resolved['database.sql.gz'] ?? ($target . '/database.sql.gz');
     if (!is_file($dbPath)) {
         $missing = '缺少产物 database.sql.gz';
         if (!in_array($missing, $reasons, true)) {
@@ -130,6 +191,9 @@ if (is_file($dbPath)) {
     }
 }
 
+foreach ($tempFiles as $tmp) {
+    @unlink($tmp);
+}
 if ($reasons === []) {
     printf("OK sha256=%s bytes=%d tables=%d inserts=%d\n", $sha, $bytes, $tables, $inserts);
     exit(0);

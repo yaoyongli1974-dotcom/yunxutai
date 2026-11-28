@@ -288,6 +288,11 @@ if (is_dir(BASE_PATH . '/storage/backups')) {
 } else {
     warn('备份目录不存在，请配置 bin/backup.php');
 }
+if ((string) (getenv('BACKUP_ENCRYPTION_KEY') ?: '') !== '') {
+    ok('备份加密密钥已配置（密文备份可用）');
+} else {
+    warn('未配置 BACKUP_ENCRYPTION_KEY，备份产物将以明文存储');
+}
 $workerLog = BASE_PATH . '/storage/logs/ai-workflow-worker.log';
 if (is_file($workerLog)) {
     ok('AI Worker 日志存在（mtime ' . date('Y-m-d H:i', (int) filemtime($workerLog)) . '）');

@@ -142,11 +142,15 @@ MAIL_SMTP_TIMEOUT=10
 20 3 * * * cd /srv/jidian && php bin/backup.php >> storage/logs/backup.log 2>&1
 ```
 
-产物：`storage/backups/YYYYmmdd-HHMMSS/database.sql.gz`、`uploads.tar.gz`、`verifications.tar.gz` 与 `manifest.json`。`manifest.json` 的 `files` 段记录每个实际生成产物的 `sha256` 与 `bytes`；所有产物写完后才计算校验和并生成 manifest。
+产物：`storage/backups/YYYYmmdd-HHMMSS/database.sql.gz`、`uploads.tar.gz`、`verifications.tar.gz` 与 `manifest.json`。`manifest.json` 的 `files` 段记录每个实际生成产物的明文 `sha256`/`bytes`；设置 `BACKUP_ENCRYPTION_KEY`（至少 16 字符）后，明文产物会被 AES-256-CBC 加密为 `*.enc` 并立即删除，manifest 额外记录密文 `sha256`/`bytes`、IV 与密钥指纹；密钥本身不写入备份目录，也不写入 Git。
 
 每次备份后（以及演练/恢复前）先做完整性核验：
 
 ```bash
+# 加密备份：必须提供同一密钥；错误密钥/密文篡改都会失败
+BACKUP_ENCRYPTION_KEY='...' php bin/restore-check.php storage/backups/YYYYmmdd-HHMMSS
+
+# 未加密的历史备份
 php bin/restore-check.php storage/backups/YYYYmmdd-HHMMSS
 ```
 

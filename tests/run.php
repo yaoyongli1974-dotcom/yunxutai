@@ -4253,6 +4253,60 @@ test('P6：10 个并发请求用同一去重键只产生一条站内通知', fun
     check(db_count('notifications', 'dedupe_key = ?', [hash('sha256', $key)]) === 1, '应只写入一条通知');
 });
 
+echo "\n[Phase 7：备份加密与完整性]\n";
+
+test('P7：加密备份需正确密钥核验，错误密钥与篡改均失败', function (): void {
+    $key = 'p7-backup-key-0123456789';
+    $backupOut = [];
+    $backupRc = 0;
+    $command = 'BACKUP_ENCRYPTION_KEY=' . escapeshellarg($key)
+        . ' php ' . escapeshellarg(BASE_PATH . '/bin/backup.php') . ' --keep=3 2>&1';
+    exec($command, $backupOut, $backupRc);
+    check($backupRc === 0, '加密备份失败：' . implode("\n", $backupOut));
+    $dir = null;
+    foreach ($backupOut as $line) {
+        if (preg_match('/备份完成：(\S+)/', $line, $m) === 1) {
+            $dir = $m[1];
+        }
+    }
+    check($dir !== null && is_dir($dir), '未找到备份输出目录');
+    $manifestPath = $dir . '/manifest.json';
+    check(is_file($manifestPath), '缺少 manifest');
+    $manifest = json_decode((string) file_get_contents($manifestPath), true);
+    check(is_array($manifest), 'manifest 解析失败');
+    check(($manifest['encryption'] ?? null) === 'aes-256-cbc', 'manifest 未记录加密方式');
+    check(($manifest['key_fingerprint'] ?? null) === substr(hash('sha256', $key), 0, 16), '密钥指纹不符');
+    check(!is_file($dir . '/database.sql.gz') && is_file($dir . '/database.sql.gz.enc'), '明文未删除或密文不存在');
+    check(!array_key_exists('BACKUP_ENCRYPTION_KEY', $manifest), '密钥不得写入 manifest');
+
+    $checkScript = BASE_PATH . '/bin/restore-check.php';
+    $rightOut = [];
+    $rightRc = 0;
+    exec('BACKUP_ENCRYPTION_KEY=' . escapeshellarg($key) . ' php ' . escapeshellarg($checkScript) . ' ' . escapeshellarg($dir) . ' 2>&1', $rightOut, $rightRc);
+    check($rightRc === 0, '正确密钥核验失败：' . implode("\n", $rightOut));
+
+    $wrongOut = [];
+    $wrongRc = 0;
+    exec('BACKUP_ENCRYPTION_KEY=wrong-key-0123456789 php ' . escapeshellarg($checkScript) . ' ' . escapeshellarg($dir) . ' 2>&1', $wrongOut, $wrongRc);
+    check($wrongRc === 1, '错误密钥应核验失败');
+
+    $encPath = $dir . '/database.sql.gz.enc';
+    $original = (string) file_get_contents($encPath);
+    $tampered = $original;
+    $tampered[0] = chr((ord($tampered[0]) + 1) % 256);
+    file_put_contents($encPath, $tampered);
+    $tamperOut = [];
+    $tamperRc = 0;
+    exec('BACKUP_ENCRYPTION_KEY=' . escapeshellarg($key) . ' php ' . escapeshellarg($checkScript) . ' ' . escapeshellarg($dir) . ' 2>&1', $tamperOut, $tamperRc);
+    check($tamperRc === 1, '密文篡改应核验失败');
+    file_put_contents($encPath, $original);
+
+    foreach (glob($dir . '/*') ?: [] as $file) {
+        @unlink($file);
+    }
+    @rmdir($dir);
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {
