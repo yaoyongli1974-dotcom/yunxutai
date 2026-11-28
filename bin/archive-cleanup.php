@@ -100,13 +100,22 @@ $process = static function (array $row) use ($maxAttempts, &$stats): void {
         }
 
         // 文件系统与 MySQL 无法共享事务：先删物理文件（幂等、缺失即成功），再收尾数据库记录。
+        // 原始副本与处理后文件同生命周期，必须一起清理，避免残留可恢复的隐私数据。
+        $originalKey = null;
+        if ($fileId !== null) {
+            $originalKey = Db::value('SELECT original_storage_key FROM archive_files WHERE id = ? LIMIT 1', [$fileId]);
+        }
         Storage::delete($storageKey);
+        if ($originalKey !== null && $originalKey !== '') {
+            Storage::delete((string) $originalKey);
+        }
         if ($fileId !== null) {
             Db::query('DELETE FROM archive_files WHERE id = ? AND archive_id = ?', [$fileId, $archiveId]);
         }
         Db::update('archive_cleanup_queue', ['status' => 'done', 'last_error' => null], 'id = ?', [$queueId]);
         Audit::log('archive.file_cleanup', 'archive', $archiveId, [
             'queue_id' => $queueId, 'file_id' => $fileId, 'result' => 'cleaned',
+            'original_removed' => $originalKey !== null && $originalKey !== '',
         ]);
         $stats['cleaned']++;
         echo "  已清理：queue={$queueId} archive={$archiveId}\n";

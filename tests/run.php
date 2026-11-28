@@ -4051,6 +4051,93 @@ test('P3：事实审核完成后联动工作流审核步骤与生成日志', fun
     );
 });
 
+echo "\n[Phase 4：文件哈希与处理溯源]\n";
+
+test('P4：JPEG 原始哈希与处理后哈希分别记录且可追溯', function (): void {
+    $owner = make_family_user('p4-hash');
+    $familyId = \App\Services\FamilyService::create($owner, '哈希家族', 'p4-hash-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '哈希档案', 'privacy' => 'private']);
+
+    $tmp = sys_get_temp_dir() . '/p4-hash-' . bin2hex(random_bytes(4)) . '.jpg';
+    $image = imagecreatetruecolor(24, 24);
+    imagefill($image, 0, 0, imagecolorallocate($image, 120, 60, 30));
+    imagejpeg($image, $tmp, 75);
+    imagedestroy($image);
+    $originalHash = (string) hash_file('sha256', $tmp);
+
+    login((string) $owner['email'], 'FamilyTest@123');
+    $upload = http('POST', '/archives/' . $archiveId . '/files', [
+        '_token' => csrf_token('/archives/' . $archiveId),
+    ], ['file' => $tmp], false);
+    check($upload['status'] === 302, '上传应重定向');
+
+    $file = Db::fetch('SELECT * FROM archive_files WHERE archive_id = ? LIMIT 1', [$archiveId]);
+    check($file !== null, '缺少档案文件记录');
+    check((string) $file['original_sha256'] === $originalHash, '原始哈希必须记录上传前字节');
+    check((string) $file['processed_sha256'] === (string) $file['sha256'], '兼容 sha256 应表示处理后哈希');
+    check(!empty($file['original_storage_key']) && (int) $file['original_kept'] === 1, '应保留原始文件副本');
+    check((string) $file['processing_method'] === 'jpeg_reencode_gd', '处理方式为 GD 重编码');
+
+    $processedPath = \App\Core\Storage::absolute((string) $file['storage_key']);
+    $originalPath = \App\Core\Storage::absolute((string) $file['original_storage_key']);
+    check($processedPath !== null && $originalPath !== null, '两份物理文件都应存在');
+    check((string) hash_file('sha256', (string) $processedPath) === (string) $file['processed_sha256'], '处理后哈希与物理文件一致');
+    check((string) hash_file('sha256', (string) $originalPath) === $originalHash, '原始哈希与物理副本一致');
+    check(
+        db_count('archive_file_processing', 'archive_file_id = ?', [(int) $file['id']]) === 1,
+        '应写入处理溯源记录'
+    );
+    @unlink($tmp);
+});
+
+test('P4：伪造图片签名与多态内容被拒绝', function (): void {
+    $owner = make_family_user('p4-forged');
+    $familyId = \App\Services\FamilyService::create($owner, '伪造家族', 'p4-forged-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '伪造档案', 'privacy' => 'private']);
+    $tmp = sys_get_temp_dir() . '/p4-forged-' . bin2hex(random_bytes(4)) . '.gif';
+    file_put_contents($tmp, "GIF89a<script>alert(1)</script>");
+
+    login((string) $owner['email'], 'FamilyTest@123');
+    // 控制器无论成功失败都 PRG 重定向，实际拒绝以数据库无记录为准。
+    http('POST', '/archives/' . $archiveId . '/files', [
+        '_token' => csrf_token('/archives/' . $archiveId),
+    ], ['file' => $tmp], false);
+    check(db_count('archive_files', 'archive_id = ?', [$archiveId]) === 0, '伪造图片不应写入文件记录');
+    @unlink($tmp);
+});
+
+test('P4：归档清理同时删除原始副本与处理后文件', function (): void {
+    $owner = make_family_user('p4-clean');
+    $familyId = \App\Services\FamilyService::create($owner, '清理哈希家族', 'p4-clean-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '清理档案', 'privacy' => 'private']);
+    $tmp = sys_get_temp_dir() . '/p4-clean-' . bin2hex(random_bytes(4)) . '.jpg';
+    $image = imagecreatetruecolor(16, 16);
+    imagefill($image, 0, 0, imagecolorallocate($image, 20, 90, 160));
+    imagejpeg($image, $tmp, 70);
+    imagedestroy($image);
+
+    login((string) $owner['email'], 'FamilyTest@123');
+    $upload = http('POST', '/archives/' . $archiveId . '/files', [
+        '_token' => csrf_token('/archives/' . $archiveId),
+    ], ['file' => $tmp], false);
+    check($upload['status'] === 302, '上传应成功');
+    $file = Db::fetch('SELECT * FROM archive_files WHERE archive_id = ? LIMIT 1', [$archiveId]);
+    check($file !== null && !empty($file['original_storage_key']), '应存在原始副本');
+    $processed = (string) \App\Core\Storage::absolute((string) $file['storage_key']);
+    $original = (string) \App\Core\Storage::absolute((string) $file['original_storage_key']);
+    check(is_file($processed) && is_file($original), '清理前两份文件都应存在');
+
+    \App\Services\ArchiveService::requestDelete($owner, $archiveId);
+    \App\Services\ArchiveService::approveDelete($owner, $archiveId, true);
+    $output = [];
+    $rc = 0;
+    exec('php ' . escapeshellarg(BASE_PATH . '/bin/archive-cleanup.php') . ' --once --limit=20 2>&1', $output, $rc);
+    check($rc === 0, '清理 worker 应成功：' . implode("\n", $output));
+    check(!is_file($processed) && !is_file($original), '原始副本与处理后文件都应被清理');
+    check(db_count('archive_files', 'archive_id = ?', [$archiveId]) === 0, '文件记录应被清理');
+    @unlink($tmp);
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

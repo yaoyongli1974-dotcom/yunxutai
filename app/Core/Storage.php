@@ -78,7 +78,7 @@ final class Storage
      * 数字档案上传：沿用统一 MIME 白名单与随机文件名，返回 SHA-256 供完整性校验。
      * JPEG 在 GD 可用时重编码以清理 EXIF 等敏感元数据；失败时保留原文件而不中断上传。
      *
-     * @return array{disk_path:string, original_name:string, mime:string, size_bytes:int, sha256:string, kind:string}
+     * @return array{disk_path:string, original_name:string, mime:string, size_bytes:int, sha256:string, kind:string, original_sha256:string, original_size_bytes:int, original_storage_key:string|null, original_kept:bool, processed_sha256:string, processing_method:string, processing_library:string|null, processing_params:string|null}
      */
     public static function storeArchiveUpload(array $file): array
     {
@@ -118,25 +118,75 @@ final class Storage
         }
         @chmod($target, 0640);
 
+        // 先记录用户实际上传字节的哈希，再做任何服务端归一化/重新编码。
+        $originalSha256 = (string) hash_file('sha256', $target);
+        $originalSize = (int) filesize($target);
+        $method = 'none';
+        $library = null;
+        $params = null;
+        $originalStorageKey = null;
+        $originalKept = false;
+
         if ($mime === 'image/jpeg' && function_exists('imagecreatefromjpeg')) {
-            try {
-                $image = @imagecreatefromjpeg($target);
-                if ($image !== false) {
-                    imagejpeg($image, $target, 88);
-                    imagedestroy($image);
-                }
-            } catch (\Throwable $e) {
-                // 元数据清理失败不影响已通过安全校验的原文件。
+            $image = @imagecreatefromjpeg($target);
+            if ($image === false) {
+                @unlink($target);
+                throw new HttpException(422, '图片内容无效或已损坏');
             }
+            // 保留原始文件副本，避免重新编码后无法追溯用户上传的原始字节。
+            $originalDir = self::uploadsPath('archives/original/' . date('Y/m'));
+            if ((is_dir($originalDir) || mkdir($originalDir, 0775, true) || is_dir($originalDir))) {
+                $originalPath = $originalDir . '/' . bin2hex(random_bytes(16)) . '.jpg';
+                if (copy($target, $originalPath)) {
+                    @chmod($originalPath, 0640);
+                    $originalStorageKey = 'archives/original/' . date('Y/m') . '/' . basename($originalPath);
+                    $originalKept = true;
+                }
+            }
+            imagejpeg($image, $target, 88);
+            imagedestroy($image);
+            $method = 'jpeg_reencode_gd';
+            $library = function_exists('gd_info') ? 'GD ' . (string) (gd_info()['GD Version'] ?? '') : 'GD';
+            $params = 'quality=88';
         }
+
+        // MIME 白名单之外再做文件签名校验。getimagesize 对 GIF89a+HTML 多态文件仍返回 true，
+        // 因此对 GIF 追加 GD 真实解码；JPEG 已在归一化时解码，PNG 等沿用 getimagesize。
+        $decodedGif = null;
+        if ($mime === 'image/gif' && function_exists('imagecreatefromgif')) {
+            $decodedGif = @imagecreatefromgif($target);
+        }
+        $invalid = ($decodedGif !== null && $decodedGif === false)
+            || (str_starts_with($mime, 'image/') && @getimagesize($target) === false);
+        if ($invalid) {
+            @unlink($target);
+            if ($originalStorageKey !== null) {
+                self::delete($originalStorageKey);
+            }
+            throw new HttpException(422, '图片内容无效或已损坏');
+        }
+        if ($decodedGif instanceof \GdImage) {
+            imagedestroy($decodedGif);
+        }
+
+        $processedSha256 = (string) hash_file('sha256', $target);
 
         return [
             'disk_path' => $subdir . '/' . basename($target),
             'original_name' => mb_substr(basename((string) ($file['name'] ?? 'file')), 0, 200),
             'mime' => $mime,
             'size_bytes' => (int) filesize($target),
-            'sha256' => (string) hash_file('sha256', $target),
+            // 兼容字段：表示当前可下载（处理后）文件的哈希。
+            'sha256' => $processedSha256,
             'kind' => self::kindFromMime($mime),
+            'original_sha256' => $originalSha256,
+            'original_size_bytes' => $originalSize,
+            'original_storage_key' => $originalStorageKey,
+            'original_kept' => $originalKept,
+            'processed_sha256' => $processedSha256,
+            'processing_method' => $method,
+            'processing_library' => $library,
+            'processing_params' => $params,
         ];
     }
 

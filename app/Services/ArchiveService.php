@@ -201,17 +201,43 @@ final class ArchiveService
                     'sha256' => $stored['sha256'],
                     'file_role' => 'original',
                     'processing_status' => 'ready',
+                    'original_sha256' => $stored['original_sha256'],
+                    'original_size' => $stored['original_size_bytes'],
+                    'original_storage_key' => $stored['original_storage_key'],
+                    'processed_sha256' => $stored['processed_sha256'],
+                    'processing_method' => $stored['processing_method'],
+                    'processing_library' => $stored['processing_library'],
+                    'processing_params' => $stored['processing_params'],
+                    'processed_at' => date('Y-m-d H:i:s'),
+                    'original_kept' => $stored['original_kept'] ? 1 : 0,
+                    'verified' => 1,
+                ]);
+                Db::insert('archive_file_processing', [
+                    'archive_file_id' => $id,
+                    'original_sha256' => $stored['original_sha256'],
+                    'processed_sha256' => $stored['processed_sha256'],
+                    'original_size' => $stored['original_size_bytes'],
+                    'processed_size' => $stored['size_bytes'],
+                    'processing_method' => $stored['processing_method'],
+                    'processing_library' => $stored['processing_library'],
+                    'processing_params' => $stored['processing_params'],
+                    'worker_id' => PHP_SAPI === 'cli' ? 'cli' : 'web',
+                    'verified' => 1,
                 ]);
                 Audit::log('archive.file.upload', 'archive_file', $id, [
-                    'archive_id' => $archiveId, 'sha256' => $stored['sha256'],
+                    'archive_id' => $archiveId,
+                    'sha256' => $stored['sha256'],
+                    'original_sha256' => $stored['original_sha256'],
+                    'processed_sha256' => $stored['processed_sha256'],
+                    'processing_method' => $stored['processing_method'],
                 ], $user === null ? 0 : (int) $user['id']);
                 return $id;
             });
         } catch (\Throwable $e) {
-            // 文件系统无法与 MySQL 共享事务：失败时补偿删除已落盘文件。
-            $path = Storage::absolute((string) $stored['disk_path']);
-            if ($path !== null && is_file($path)) {
-                @unlink($path);
+            // 文件系统无法与 MySQL 共享事务：失败时补偿删除已落盘文件（含原始副本）。
+            Storage::delete((string) $stored['disk_path']);
+            if (!empty($stored['original_storage_key'])) {
+                Storage::delete((string) $stored['original_storage_key']);
             }
             throw $e;
         }
@@ -220,7 +246,9 @@ final class ArchiveService
 
     public static function files(int $archiveId, ?string $role = null): array
     {
-        $sql = 'SELECT id, archive_id, original_filename, mime_type, file_size, sha256, file_role, processing_status, created_at
+        $sql = 'SELECT id, archive_id, original_filename, mime_type, file_size, sha256,
+                       original_sha256, original_size, processed_sha256, processing_method, processed_at,
+                       file_role, processing_status, created_at
                 FROM archive_files WHERE archive_id = ?';
         $params = [$archiveId];
         if ($role !== null) {
