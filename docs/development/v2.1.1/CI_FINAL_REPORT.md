@@ -1,7 +1,7 @@
 # Phase 10 — CI 最终报告（本地门禁）
 
-代码基线：`722c256`（Phase 10 报告提交）+ 本地门禁修复（时区一致性、mysqldump 兼容性，待提交）；分支 `feature/v2.1.1-production-hardening`。
-**状态标注**：本地门禁全部实跑通过（最新 167/0）；远程 PR #2 已创建，首轮 CI run `46154385566` 红灯并已定位/修复，等待推送修复后复跑，结果不得提前写为通过。
+代码基线：`8cc1235`（Phase 10 修复提交，含时区一致性与 mysqldump 兼容性修复）；分支 `feature/v2.1.1-production-hardening`。
+**状态标注**：本地门禁全部实跑通过（167/0）；远程 PR #2 四矩阵 CI run `46155390992` 全绿（4/4 job success、全部 step success、0 注解、四项 checks pass）。首轮红灯 run `46154385566` 的根因已修复并复验。
 
 ## 1. 本地全量门禁（实跑）
 
@@ -22,7 +22,7 @@
 
 PHPStan 12 处初始错误全部为 `bin/seed-performance.php` 的 PHPDoc `limits()` 返回形状写错，已修正为 `@return array<string,array{min:int,max:int}>`；未加 baseline、未降 level、未改逻辑。
 
-## 2. 远程 CI（未执行）
+## 2. 远程 CI（已通过）
 
 任务书要求四矩阵全部通过：
 - PHP 8.4 + MySQL 8.4
