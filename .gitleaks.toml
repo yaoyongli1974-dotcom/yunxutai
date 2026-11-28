@@ -1,0 +1,8 @@
+title = "yunxutai gitleaks config"
+
+[allowlist]
+description = "测试夹具与文档占位不是真实凭据"
+paths = [
+  '''tests/run.php''',
+  '''docs/.*''',
+]
