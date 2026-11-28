@@ -9,6 +9,10 @@ declare(strict_types=1);
 define('BASE_PATH', dirname(__DIR__));
 if (PHP_SAPI !== 'cli') { fwrite(STDERR, "仅限命令行运行\n"); exit(1); }
 
+// PHP 8.5 / 禁用 register_argc_argv 的环境下 $argv/$argc 可能未定义，统一归一化。
+$argv = $argv ?? [];
+$argc = count($argv);
+
 if (in_array('--help', $argv, true) || in_array('-h', $argv, true)) {
     $help = <<<'TXT'
 用法：php bin/restore-check.php <备份目录|backup.sql.gz>
