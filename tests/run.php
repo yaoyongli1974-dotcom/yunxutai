@@ -3349,6 +3349,23 @@ test('页脚显示版本号印记', function (): void {
     check_contains($home['body'], 'v2.0.0');
 });
 
+test('代码审查：Db 拒绝非法列名', function (): void {
+    $rejected = false;
+    try {
+        \App\Core\Db::insert('users', ['bad-name' => 'x']);
+    } catch (\InvalidArgumentException $e) {
+        $rejected = true;
+    }
+    check($rejected, 'Db::insert 必须校验列名');
+    $rejected = false;
+    try {
+        \App\Core\Db::update('users', ['1bad' => 'x'], 'id = ?', [0]);
+    } catch (\InvalidArgumentException $e) {
+        $rejected = true;
+    }
+    check($rejected, 'Db::update 必须校验列名');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

@@ -54,7 +54,7 @@ final class Db
 
     public static function insert(string $table, array $data): int
     {
-        $columns = array_keys($data);
+        $columns = explode(', ', self::columns(array_keys($data)));
         $sql = sprintf(
             'INSERT INTO %s (%s) VALUES (%s)',
             $table,
@@ -70,7 +70,8 @@ final class Db
         if ($data === []) {
             return 0;
         }
-        $sets = implode(', ', array_map(static fn (string $column): string => $column . ' = ?', array_keys($data)));
+        $columns = explode(', ', self::columns(array_keys($data)));
+        $sets = implode(', ', array_map(static fn (string $column): string => $column . ' = ?', $columns));
         $stmt = self::query(
             sprintf('UPDATE %s SET %s WHERE %s', $table, $sets, $where),
             [...array_values($data), ...$whereParams]
@@ -92,5 +93,16 @@ final class Db
             }
             throw $e;
         }
+    }
+
+    /** 列名白名单：阻止 mass assignment 演变为 SQL 注入 / 越权改字段。 */
+    private static function columns(array $columns): string
+    {
+        foreach ($columns as $column) {
+            if (!is_string($column) || preg_match('/^[a-z_][a-z0-9_]*$/', $column) !== 1) {
+                throw new \InvalidArgumentException('非法的数据库列名');
+            }
+        }
+        return implode(', ', $columns);
     }
 }

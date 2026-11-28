@@ -1,220 +1,75 @@
-# 云叙台
+# 云叙台 YunXuTai v2.0.0
 
-> 记取来时路，安放未尽言。
+[![CI](https://github.com/yaoyongli1974-dotcom/yunxutai/actions/workflows/ci.yml/badge.svg)](https://github.com/yaoyongli1974-dotcom/yunxutai/actions/workflows/ci.yml)
 
-云叙台是一个以「在线纪念馆 + 家族记忆协作」为核心的中文网络纪念平台。它不做虚拟祭品商城，也不做香火排行榜；基础纪念永久免费，付费只面向真实的人工服务（老照片修复、纪念视频、生平整理、家族数字档案、机构版）。
+以个人和家族为核心，以数字档案为载体，以 AI 为整理工具，以家族协作为基础的家族记忆与数字文化传承平台。
+保留原有纪念馆业务，并扩展家族空间、谱系、档案馆、AI 家族记忆工坊、时间轴、展馆与统一通知中心。
 
-本仓库是可直接部署的 **PHP MVP**：服务端渲染、无框架、按业务模块组织，覆盖纪念馆创建、权限协作、祭奠留言、内容审核、举报申领、数据权利请求与平台运营后台。
+## 能力总览
+- **纪念空间**：个人纪念馆、追思互动、生平资料、身份核验后公开与收录。
+- **家族空间**：家族创建/资料/头像/隐私、成员邀请与角色、多家族协作。
+- **家族谱系**：人物档案（可无账户）、关系提交与审核、支系、人物合并、按需加载的谱系图。
+- **数字档案馆**：照片/视频/音频/文献、标签、版本、人物关联、照片区域标注、授权下载与导出。
+- **AI 家族记忆工坊**：OCR、语音转写、口述历史、事实候选与人工审核、人物传记/家族史草稿；统一 Provider 适配层与独立 Worker。
+- **家族时间轴**：家族/人物/迁徙事件、纪念日、来源追踪。
+- **数字展馆**：专题展览、展品权限复核、草稿→发布→下线。
+- **统一通知中心**：站内/邮件、偏好、失败旁路。
+- **机构能力预留**：仅平台管理员管理，显式家族归属，不构成完整多租户。
 
----
+## 技术架构
+PHP 8.4+ 原生模块化、MySQL 8.4 / MariaDB 11、PDO、服务端渲染、原生 JavaScript；
+小程序通过 `/api/v1` 接入；Web 与 API 共用 Service + Policy；运行时零 Composer 依赖。
 
-## 已实现
-
-- **纪念馆**：逝者档案、生平时间轴、文章、照片/视频/音频/文档、封面、四种访问策略（公开 / 不公开收录 / 私密 / 暂停）。
-- **祭奠与留言**：献花、点烛、上香、鞠躬；附言；匿名选项；留言簿；频率限制与内容审核。
-- **身份核验（公开前置）**：新馆默认私密；提交死亡证明/亲属关系材料并经平台人工核验后，才可公开、被收录或进入 sitemap；核验材料私有存储、仅管理员可查看。
-- **权限协作**：馆主 / 协作者（编辑、只读）/ 访客 / 平台管理员；服务端强制校验，私密馆媒体逐个鉴权。
-- **合规与治理**：创建声明、活人被祭奠紧急举报、举报优先级、隐私说明、服务条款、数据导出/删除/撤回授权申请。
-- **审核与运营**：身份核验队列、待审留言/文章/媒体、举报处理、纪念馆暂停/恢复、申领核验、服务咨询、用户管理、审计日志、管理端批量审核（勾选 ≤50 条一次生效，逐条留痕）。
-- **收费透明**：基础纪念永久免费；增值服务明码标价、开工前书面报价、不自动续费；不卖虚拟祭品、不做排行榜。
-- **安全基线**：CSRF、会话固定防护、登录与提交限流、算术验证码、强密码、管理端二次验证（TOTP）、上传 MIME/大小校验、输出转义、CSP、安全响应头、审计日志。
-- **AI 自助工作室**：馆主可用 AI 修复老照片、生成纪念短片、整理生平草稿、生成家族数字档案；输出默认仅成员可见，文章先存草稿待家属核对；价格在后台占位编辑，内测期不实际扣费。
-- **工程化**：CLI 安装器、演示数据、集成测试脚本、备份脚本、Nginx/PHP 配置样例。
-
-## 技术栈
-
-| 层 | 选型 | 说明 |
-|---|---|---|
-| 运行时 | PHP 8.4+（目标 8.5） | 无 Composer 依赖，`declare(strict_types=1)` |
-| 数据库 | MySQL 8.4 LTS / MariaDB 11+ | `utf8mb4`，InnoDB，PDO 预处理 |
-| 会话/限流 | PHP 原生 session + MySQL `throttle` 表 | 单机即可运行；配置 `REDIS_URL` 后限流与会话改存 Redis（多实例） |
-| 文件 | 本地 `storage/uploads` | 通过 `/media/{id}` 鉴权输出；可替换对象存储 |
-| 前端 | 服务端模板 + 原生 CSS/JS | PC/H5 响应式；无外部 CDN |
-
-> 需求中的 Redis、对象存储、邮件/短信在 MVP 中以可替换的本地实现代替，接口边界见 [docs/deployment.md](docs/deployment.md)。
+关键目录：
+```
+app/Core/           # Router / Auth / ApiAuth / Policy / Audit / Storage / RateLimiter / Kv
+app/Api/            # API 入口、Input、Presenter、Controllers（/api/v1）
+app/Services/       # 业务服务：Family / Genealogy / Archive / AiWorkflow / Timeline / Exhibition / Notification
+app/Services/Ai/    # AiClientFactory / OpenAiClient / ProcessingClient（OCR/ASR）
+app/Controllers/    # Web 控制器（含 admin/）
+app/Views/          # 服务端模板（含 family/、archive/、ai/、timeline/、exhibition/）
+database/migrations/# 独立增量迁移（schema_migrations + checksum）
+bin/                # install / migrate-v2 / ai-worker（旧）/ ai-workflow-worker（2.0）/ backup / restore-check / doctor
+deploy/             # nginx.conf、php.ini、ai-workflow-worker.service
+miniprogram/        # 微信小程序
+tests/              # 集成测试（bin/test.sh 统一入口）
+docs/development/   # 架构、数据模型与阶段报告
+```
 
 ## 快速开始
-
-环境要求：PHP 8.4+（PDO MySQL、mbstring、fileinfo、GD、openssl）、MySQL 8.0+ 或 MariaDB 11+。
-
 ```bash
-cd /path/to/jidian
-
-# 1. 配置（首次安装也会自动生成 .env 与随机 APP_KEY）
+git clone https://github.com/yaoyongli1974-dotcom/yunxutai.git
+cd yunxutai
 cp .env.example .env
-# 编辑 DB_*、APP_URL、ADMIN_EMAIL；生产环境 APP_DEBUG=false
-
-# 2. 建库、建表、创建管理员（--demo 可选，写入演示纪念馆）
-php bin/install.php --demo
-
-# 3. 启动
-php -S 127.0.0.1:8099 -t public
+# 编辑 .env：DB_DATABASE=yunxutai，配置 APP_KEY / DB 账号 / SMTP
+php bin/install.php --fresh --demo
+php -S 127.0.0.1:8110 -t public
 ```
+生产请使用 `deploy/nginx.conf` 指向 `public/`，并配置 PHP-FPM。
 
-打开 <http://127.0.0.1:8099>。安装器会打印管理员邮箱与密码；演示数据账号：
-
-| 角色 | 邮箱 | 密码 |
-|---|---|---|
-| 馆主 | `demo@example.com` | `Demo@123456` |
-| 协作者 | `family@example.com` | `Demo@123456` |
-| 普通用户 | `claimant@example.com` | `Demo@123456` |
-
-演示纪念馆：<http://127.0.0.1:8099/m/zhang-mingyuan>
-
-## 身份核验（公开前置）
-
-网络祭奠最常见的两类事故是「活人被祭拜」与「未审核即公开」。本项目把核验放在公开之前，而不是事后补救：
-
-1. 新建纪念馆一律为 **私密草稿**，创建表单不能选择公开。
-2. 馆主在「身份核验」中提交材料：死亡证明/官方死亡登记、亲属关系证明、已通过的申领记录或其他可核验材料；支持 JPG/PNG/WebP/PDF，单文件 ≤10MB。
-3. 平台管理员在 `/admin/verifications` 人工审核；通过后纪念馆标记 `verified`，才允许设为公开/不公开收录、发布与进入 sitemap；驳回必须填写理由。
-4. 公开页展示「身份材料已核验」标记；未核验馆即使被直接改为 `public`，访客仍然 404，列表与 sitemap 也会排除。
-5. 核验材料存放于 `storage/verifications`（Web 根之外），不进入媒体库、不生成公开 URL，仅管理员可下载，下载行为写审计日志。
-6. 用户可申请删除核验材料；删除后核验标记失效，公开范围回退私密。
-7. **账号实名说明**：MVP 不采集身份证号，公开纪念馆的责任人通过「登录账号 + 关系声明 + 核验材料 + IP HMAC + 审计日志」追溯。正式上线应接入合规的实名认证/短信服务，在注册或首次公开建馆时完成账号实名；在此之前，平台以人工材料核验作为公开门槛，不能把匿名账号直接当作已实名用户。
-
-举报按风险分级：`living_person` / `fake_person` 为紧急（urgent），隐私/侮辱/违法为高（high），后台优先展示并支持先行暂停。
-
-## 收费与长期服务
-
-- 基础纪念功能永久免费：建馆、生平、照片、祭奠、留言、成员协作不按次数或年限收费，不做付费馆等级。
-- 增值服务只针对真实人工交付，参考价：照片修复 80–300 元/张、纪念视频 600–3000 元/支、生平整理 300–1200 元/篇、家族数字档案 1500 元起/族卷、机构版书面报价。
-- 开工前书面确认范围、交付物、周期与总价；未开工可全额退款，已开工按进度结算；不自动续费、不默认勾选、不卖虚拟祭品、不设消费排行榜。
-- 长期保存与停止运营：服务条款明确数据导出方式、公告期与到期后的删除/匿名化处置；不承诺“永久保存”，也不以停止服务要挟续费。
-- MVP 不接入支付；避免在没有合同、发票与退款流程时产生收费行为。
-
-## AI 自助工作室
-
-馆主进入「馆内管理 → AI 工作室」可使用四项能力；协作者只读，平台管理员可查看任务与价格。
-
-| 能力 | 输入 | 输出 | 占位价（后台可改） |
-|---|---|---|---|
-| 老照片修复 | 一张馆内照片 | 新的修复副本，不覆盖原图 | 99 元/张 |
-| 纪念短片 | 1–8 张照片 | 1280×720 MP4，按时间轴/照片顺序生成分镜 | 399 元/支 |
-| 生平整理 | 生平、时间轴、可选标题/备注 | 文章草稿，标注「AI 辅助整理（待家属核对）」 | 199 元/篇 |
-| 家族数字档案 | 生平、时间轴、已发布文章、照片 | 自包含 HTML 档案，可下载 | 999 元/份 |
-
-- 价格与说明在 `/admin/ai-services` 行内编辑，单位统一为分存储；`price_note` 默认写明「占位价，待运营确认；内测期不实际扣费」。开启收款确认制后按下单时价格快照结算。
-- **大模型接入在后台「AI 大模型设置」页配置**（`/admin/ai-settings`），双凭证结构：**主组一套凭证服务文本+图像**（运行模式 demo/openai、API Key 掩码显示、兼容 API 基础地址、文本/图像模型名），**视频组独立一套**（可选，留空时自动回退主组，预留未来接入外部视频 API，当前纪念短片仍由 ffmpeg 本地合成）。各自支持「获取模型列表」探测 `{base_url}/models` 并逐域回填；接口超时、每人每日上限、同步/异步执行为全局配置。设置写入 `platform_settings` 表后覆盖 `.env` 默认值并即时生效；`.env` 的 `AI_*` 变量仍可作为默认与部署期初始值。
-- **收费订单（收款确认制，默认关闭）**：后台「AI 大模型设置 → 费用模式」可切到「收款后生成」。开启后，馆主提交四项 AI 能力会先生成 `pending` 订单（价格快照自 `ai_services`，不占用每日免费次数、不产生任务），平台在「后台 → AI 订单」核验收款并填写收款单号后点击「确认收款」，系统才创建任务（同步或入队）；未确认不扣费，可填写原因驳回。免费模式（默认）行为与以前完全一致。
-- 所有 AI 输出默认 `members` 可见，需馆主在媒体库显式切换为访客可见；文章始终先落 `draft`。
-- 每人每馆每日最多 10 个任务；失败任务可在 AI 工作室或后台重试，错误原因保留。
-- 运行模式：
-  - `AI_PROVIDER=demo`（默认）：本地 GD 增强、模板化文章/分镜、ffmpeg 合成 MP4，不需要外部 API。
-  - `AI_PROVIDER=openai`：配置 `AI_API_KEY`、`AI_BASE_URL`、`AI_TEXT_MODEL`、`AI_IMAGE_MODEL`；照片修复走 Images Edit，文本走 Chat Completions。
-- 同步/异步：`AI_SYNC=true` 在请求内完成（适合演示/低并发）；生产建议 `AI_SYNC=false`，用 `php bin/ai-worker.php --limit=3` 由计划任务消费队列。
-- 依赖：`ffmpeg`（短片合成）、GD（本地图像处理）、`allow_url_fopen`（OpenAI 调用；本机无 PHP curl 扩展）。
-- 合规提示：只上传必要的照片与生平文本，不向第三方 AI 发送身份核验材料、身份证号或联系方式；第三方处理需在隐私政策中披露并取得同意。AI 输出可能出错，必须由家属核对后才能公开。
-
-已有数据库升级：
-
+## 测试与迁移
 ```bash
-# 幂等迁移（可重复执行）
-php bin/migrate.php
-```
-
-默认安全策略：历史公开/不公开纪念馆会先回退私密，馆主补充材料并经人工核验后才能重新公开。若已逐馆核实某批历史数据，可显式执行 `php bin/migrate.php --grandfather` 将其标记为已核验（会记录为历史数据迁移，仍建议抽查）。
-
-## 测试
-
-集成测试会重建独立的 `jidian_test` 数据库，不影响开发库：
-
-```bash
-chmod +x bin/test.sh
-./bin/test.sh
-```
-
-覆盖：schema、密码策略、纪念馆权限、公开页面与 sitemap、未登录/越权访问、管理员、注册验证码、祭奠与留言审核、XSS 转义、私密馆与成员媒体鉴权、草稿隔离、举报、非法上传、身份核验、媒体可见性切换、AI 四项任务与运营改价、后台 AI 大模型设置读写校验、小程序 API（token 登录、微信登录链路、公开列表/详情、私密馆 404、祭奠与留言、签名媒体鉴权、申领与重复提交、manage 创建强制私密、成员管理与邀请、举报与目标可见性）、管理端批量审核（留言/文章/媒体，仅处理待审内容并逐条写审计）、KV 与 Redis 双驱动与管理员 2FA。
-
-## 目录结构
-
-```text
-app/
-  Core/            路由、请求响应、数据库、会话、CSRF、限流、策略、存储、审计
-  Models/          按表划分的数据访问
-  Services/        纪念馆领域逻辑、演示数据
-  Controllers/     公共、账号、Manage（馆内管理）、Admin（平台后台）
-  Views/           服务端模板
-config/config.php  应用配置（环境变量优先）
-database/schema.sql
-public/            唯一 Web 根目录
-storage/           上传、日志、缓存、备份（不可公开访问）
-bin/               install.php / seed.php / test.sh / backup.php
-tests/run.php
-docs/              架构、部署、安全、合规
+bash bin/test.sh                  # 全量集成测试（自动建测试库、执行迁移）
+php bin/migrate-v2.php --status   # 迁移状态（只读）
+php bin/migrate-v2.php            # 执行增量迁移
+php bin/doctor.php                # 环境与健康检查
 ```
 
 ## 权限模型
+纪念馆维度：访客 / 只读 / 协作者 / 馆主 / 平台管理员（由现有 Policy 管理）。
+家族维度：`owner` / `admin` / `genealogy_editor` / `archive_editor` / `member` / `guest`；
+能力包括 family.view/manage、person.view/edit/merge、relationship.submit/review、
+archive.view/upload/edit/delete、file.download、ai.workflow.create、ai.result.review、
+timeline.edit、exhibition.edit/publish、data.export。
+默认拒绝、资源级校验、平台管理员无隐式家族权限；未授权资源统一 404。
 
-| 能力 | 访客 | 只读成员 | 协作者 | 馆主 | 平台管理员 |
-|---|---|---|---|---|---|
-| 查看公开/不公开馆 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 查看私密馆 | ❌ | ✅ | ✅ | ✅ | ✅ |
-| 祭奠/留言 | 需登录 | ✅ | ✅ | ✅ | ✅ |
-| 编辑资料/内容/媒体 | ❌ | ❌ | ✅ | ✅ | ✅ |
-| 发布/暂停、成员、设置 | ❌ | ❌ | ❌ | ✅ | ✅ |
-| 平台审核/暂停/用户管理 | ❌ | ❌ | ❌ | ❌ | ✅ |
+## AI Worker
+```bash
+php bin/ai-workflow-worker.php --limit=5 --max-runtime=300 --once
+```
+常驻部署参考 `deploy/ai-workflow-worker.service`（systemd）。旧版 `bin/ai-worker.php` 仅处理现有 AiJob，不执行 2.0 工作流。
 
-访问策略：
-
-- `public`：可被访客查看；`allow_search_index` 打开时才进入 sitemap 并允许搜索引擎收录。
-- `unlisted`：有链接可访问，但不出现在列表/sitemap，返回 `noindex`。
-- `private`：仅成员与管理员可见；所有媒体逐请求鉴权。
-- `suspended`：平台暂停，对外统一 404/说明页；仅管理员可恢复。
-
-## 审核与治理流程
-
-1. 用户提交祭奠附言/留言/文章 → 视配置进入 `pending`。
-2. 馆主/协作者在「馆内管理 → 审核」处理；文章可提交平台复审。
-3. 任何访客可举报纪念馆、留言、祭奠、媒体、文章；举报需验证码并限流。
-4. 平台后台处理举报：可隐藏目标内容、暂停纪念馆、记录处理结论。
-5. 活人被祭奠：举报 → 平台核验 → 暂停纪念馆 → 通知创建人申诉/补充授权材料。
-6. 申领（claim）：提交关系与说明 → 平台线下核验 → 通过后授予协作者权限（MVP 不直接转移馆主）。
-7. 数据权利请求：导出/删除/撤回授权进入后台队列，人工核验后处理；系统不提供一键永久删除。
-
-所有敏感操作写入 `audit_logs`（操作者、动作、目标、元数据、IP HMAC、时间）。
-
-## 部署
-
-生产部署清单、Nginx/PHP-FPM 样例、HTTPS、权限、备份与恢复见 [docs/deployment.md](docs/deployment.md)。最短清单：
-
-- Web 根目录必须指向 `public/`，禁止直接访问 `app/`、`config/`、`storage/`。
-- `APP_DEBUG=false`、`APP_ENV=production`、`APP_URL=https://你的域名`，使用独立且随机的 `APP_KEY`。
-- 启用 HTTPS/HSTS；数据库使用最小权限账号；`storage/` 仅 Web 进程可写。
-- 定时执行 `php bin/backup.php`，并定期做恢复演练。
-- 上传大小同时受 PHP `upload_max_filesize`/`post_max_size` 与 Nginx `client_max_body_size` 限制。
-
-## 扩展路线
-
-- Redis：已完成——限流计数与会话支持 `REDIS_URL` 切换到 Redis（纯 PHP RESP 客户端，无需扩展），见 [docs/deployment.md](docs/deployment.md) 第 8 节。
-- 对象存储：将 `Storage` 替换为 S3/OSS 适配器，媒体仍经签名 URL 或应用代理鉴权。
-- 邮件/短信：邮件通知链路已内置——`log` / `none` / `smtp` 三驱动，已接入邀请、举报处理、数据权利请求；短信暂无，未来可复用 `App\Core\Notify` 增加渠道。
-- 付费服务：订单、合同、发票与交付流程（不得售卖虚拟祭品或影响纪念公平性）。
-- 小程序：复用同一套 API/权限策略，已新增 JSON 接口层与迷你客户端（详见下文）。
-- 管理端增强：双因素认证、细粒度管理员角色、批量审核、留存策略自动执行。
-
-## 小程序 API 层（/api/v1）
-
-- 能力：登录（邮箱密码 / 微信 code）、`/me`、纪念馆列表与详情（summary / profile / life / articles / media）、文章、祭奠、留言、申领、我的纪念馆与建馆、馆主成员管理（邀请 / 角色 / 移除 / 作废邀请）。权限沿用 `Policy`，私密/暂停/未核验馆对外统一 404。
-- 统一响应：成功 `{data: ...}`，失败 `{error: {code, message}}`；登录后带 `Authorization: Bearer <token>`。错误码与端点明细见 [docs/api.md](docs/api.md)。
-- demo 账号换 token：
-
-  ```bash
-  curl -s -X POST http://127.0.0.1:8099/api/v1/auth/token \
-    -H 'Content-Type: application/json' \
-    -d '{"email":"demo@example.com","password":"Demo@123456"}'
-  ```
-
-- 微信登录需在 `.env` 配置 `WX_APPID` / `WX_SECRET` 后重启；未配置时 `/api/v1/auth/wechat` 返回 `503 wechat_not_configured`。首次微信登录会在 `wx_identities` 自动建号（合成邮箱、不可用密码），`code2session` 只在服务端完成，客户端仅传 `wx.login` 的 code。
-- 客户端：[miniprogram/](miniprogram/) 含登录（邮箱/微信）、纪念馆列表（可新建私密草稿）、详情（生平/影像/祭奠四式 + 留言簿 + 文章阅读 + 「投诉与举报」入口）、馆主「成员与邀请」管理页、个人中心；签名媒体 URL 为相对路径，客户端统一加 `BASE_URL` 前缀且不缓存。接口文档：[docs/api.md](docs/api.md)。
-
-## 文档
-
-- [架构说明](docs/architecture.md)
-- [部署与运维](docs/deployment.md)
-- [安全设计](docs/security.md)
-- [合规对照](docs/compliance.md)
-
-## 许可与声明
-
-本项目为业务系统 MVP 代码。上线前请由法务/合规人员结合《网络祭扫服务规范》（MZ/T 173—2025）及属地网信、民政要求复核文案与流程。平台不提供封建迷信内容，不诱导充值，不对祭奠行为排名。
+## 版本与许可
+当前版本：v2.0.0（Release 基于 `784bc2b`）。早期版本见 Releases：v1.0.0、v2.0.0-rc1。
+本仓库为专有/内部代码，仅公开审阅，详见 `LICENSE`；安全披露见 `SECURITY.md`。
+根目录 `需求.md` 为早期产品设计草稿，商业化设想不代表已实现功能。
