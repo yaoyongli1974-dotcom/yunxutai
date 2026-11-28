@@ -124,7 +124,10 @@ final class RespClient
             $this->port
         );
 
-        $socket = @stream_socket_client($remote, $errno, $errstr, $this->timeout);
+                $sslContext = $this->tls ? stream_context_create(['ssl' => [
+            'verify_peer' => true, 'verify_peer_name' => true, 'allow_self_signed' => false,
+        ]]) : null;
+$socket = @stream_socket_client($remote, $errno, $errstr, $this->timeout, STREAM_CLIENT_CONNECT, $sslContext);
         if (!is_resource($socket)) {
             throw new KvClientException(sprintf(
                 'Redis 连接失败（%d：%s）',

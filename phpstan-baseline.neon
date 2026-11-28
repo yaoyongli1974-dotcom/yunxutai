@@ -1,0 +1,4 @@
+# PHPStan baseline：冻结存量问题，只卡增量。
+# 首次安装依赖后可用 `vendor/bin/phpstan analyse --generate-baseline=phpstan-baseline.neon` 重新生成。
+parameters:
+    ignoreErrors: []

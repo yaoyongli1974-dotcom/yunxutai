@@ -79,6 +79,11 @@ jobs:
       - name: Miniprogram JS syntax check
         run: find miniprogram -name '*.js' -print0 | xargs -0 -n1 node --check
 
+      - name: Static analysis (PHPStan level 5, baseline for legacy)
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          vendor/bin/phpstan analyse --no-progress
+
       - name: Full integration suite (fresh DB + migrations + security tests)
         run: bash bin/test.sh
 

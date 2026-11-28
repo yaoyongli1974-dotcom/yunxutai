@@ -133,9 +133,19 @@ final class Notify
         if (!in_array($encryption, ['ssl', 'starttls', 'none', ''], true)) {
             throw new NotifyException('不支持的 SMTP 加密方式：' . $encryption);
         }
+        if (($encryption === 'none' || $encryption === '') && (string) ($username ?? '') !== '') {
+            throw new \RuntimeException('未加密的 SMTP 连接不允许发送凭据，请配置 starttls 或 ssl');
+        }
 
         $remote = ($encryption === 'ssl' ? 'ssl://' : 'tcp://') . $host;
-        $stream = @fsockopen($remote, $port, $errno, $errstr, $timeout);
+        $sslContext = stream_context_create(['ssl' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+            'allow_self_signed' => false,
+            'cafile' => (string) ($config['smtp_cafile'] ?? '') ?: null,
+            'crypto_method' => STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT,
+        ]]);
+        $stream = @stream_socket_client($remote, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT, $sslContext);
         if (!is_resource($stream)) {
             throw new NotifyException('SMTP 连接失败：' . ($errstr !== '' ? $errstr : 'unknown error') . ' (' . $errno . ')');
         }
@@ -152,7 +162,7 @@ final class Notify
 
             if ($encryption === 'starttls') {
                 self::command($stream, 'STARTTLS', [220], 'STARTTLS');
-                if (!@stream_socket_enable_crypto($stream, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+                if (!@stream_socket_enable_crypto($stream, true, STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT)) {
                     throw new NotifyException('STARTTLS 加密协商失败');
                 }
                 self::command($stream, 'EHLO ' . $identity, [250], 'EHLO(TLS)');

@@ -90,7 +90,7 @@ try {
     $admin = User::findByEmail($adminEmail);
     if ($admin !== null) {
         User::update((int) $admin['id'], ['role' => 'admin', 'status' => 'active']);
-        echo "管理员账号已存在：{$adminEmail}（已确保管理员权限，密码未改动）\n";
+echo "管理员账号已创建，请首次登录后立即修改密码（密码不在终端打印）。";
     } else {
         $password = (string) (getenv('ADMIN_PASSWORD') ?: '');
         if ($password === '') {
@@ -101,7 +101,7 @@ try {
             'role' => 'admin',
             'email_verified_at' => date('Y-m-d H:i:s'),
         ]);
-        echo "管理员已创建：\n  邮箱：{$adminEmail}\n  密码：{$password}\n  请登录后立即修改密码。\n";
+echo "管理员账号已创建，请首次登录后立即修改密码（密码不在终端打印）。";
     }
 
     if ($demo) {

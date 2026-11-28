@@ -97,24 +97,33 @@ final class ArchiveService
     /** 列表只允许返回当前用户有权查看的档案。 */
     public static function listForFamily(?array $user, int $familyId, string $search = '', int $limit = 100): array
     {
-        self::requireFamily($familyId, 'family.view', $user);
-        $params = [$familyId];
-        $sql = 'SELECT * FROM archives WHERE family_id = ? AND status IN (\'active\',\'archived\')';
+        $family = Db::fetch("SELECT * FROM families WHERE id = ? AND status = 'active' LIMIT 1", [$familyId]);
+        if ($family === null) {
+            return [];
+        }
+        $role = Policy::familyRole($familyId, $user === null ? null : (int) $user['id']);
+        if ($role === null && $family['privacy'] !== 'public') {
+            return [];
+        }
+        if (in_array($role, ['owner', 'admin', 'archive_editor'], true)) {
+            $privacy = ['private', 'family', 'public'];
+        } elseif ($role !== null) {
+            $privacy = ['family', 'public'];
+        } else {
+            $privacy = ['public'];
+        }
+        $placeholders = implode(',', array_fill(0, count($privacy), '?'));
+        $params = [$familyId, ...$privacy];
+        $sql = "SELECT * FROM archives WHERE family_id = ? AND status IN ('active','archived') AND privacy IN ({$placeholders})";
         if ($search !== '') {
             $sql .= ' AND (title LIKE ? OR description LIKE ?)';
-            $params[] = '%' . $search . '%';
-            $params[] = '%' . $search . '%';
+            $like = '%' . $search . '%';
+            $params[] = $like; $params[] = $like;
         }
         $sql .= ' ORDER BY id DESC LIMIT ' . max(1, min(200, $limit));
-        $rows = [];
-        foreach (Db::fetchAll($sql, $params) as $row) {
-            $visible = self::getVisible($user, (int) $row['id']);
-            if ($visible !== null) {
-                $rows[] = $visible;
-            }
-        }
-        return $rows;
+        return Db::fetchAll($sql, $params);
     }
+
 
     public static function getVisible(?array $user, int $archiveId): ?array
     {

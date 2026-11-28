@@ -214,12 +214,22 @@ final class Memorial
 
     public static function counts(int $memorialId): array
     {
+        $row = Db::fetch(
+            "SELECT
+                (SELECT COUNT(*) FROM tributes WHERE memorial_id = ? AND status = 'visible') AS tributes,
+                (SELECT COUNT(*) FROM messages WHERE memorial_id = ? AND status = 'visible') AS messages,
+                (SELECT COUNT(*) FROM media WHERE memorial_id = ? AND kind = 'photo' AND status = 'visible') AS photos,
+                (SELECT COUNT(*) FROM articles WHERE memorial_id = ? AND status = 'visible') AS articles,
+                (SELECT COUNT(*) FROM memorial_members WHERE memorial_id = ? AND status = 'active') AS members",
+            [$memorialId, $memorialId, $memorialId, $memorialId, $memorialId]
+        );
         return [
-            'tributes' => (int) Db::value('SELECT COUNT(*) FROM tributes WHERE memorial_id = ? AND status = ?', [$memorialId, 'visible']),
-            'messages' => (int) Db::value('SELECT COUNT(*) FROM messages WHERE memorial_id = ? AND status = ?', [$memorialId, 'visible']),
-            'photos' => (int) Db::value("SELECT COUNT(*) FROM media WHERE memorial_id = ? AND status = 'active' AND kind = 'photo'", [$memorialId]),
-            'articles' => (int) Db::value("SELECT COUNT(*) FROM articles WHERE memorial_id = ? AND status = 'published'", [$memorialId]),
-            'members' => (int) Db::value('SELECT COUNT(*) FROM memorial_members WHERE memorial_id = ? AND status = ?', [$memorialId, 'active']),
+            'tributes' => (int) ($row['tributes'] ?? 0),
+            'messages' => (int) ($row['messages'] ?? 0),
+            'media' => (int) ($row['photos'] ?? 0),
+            'articles' => (int) ($row['articles'] ?? 0),
+            'members' => (int) ($row['members'] ?? 0),
         ];
     }
+
 }
