@@ -1,13 +1,12 @@
 {
-  "name": "yunxutai/jidian",
-  "description": "云叙台 - 家族记忆与数字文化传承平台（开发期工具链；运行时零依赖）",
-  "type": "project",
-  "require": {},
-  "require-dev": {
-    "phpstan/phpstan": "^2.0",
-    "rector/rector": "^1.0"
-  },
-  "config": {
-    "sort-packages": true
-  }
+    "name": "yunxutai/jidian",
+    "description": "云叙台 - 家族记忆与数字文化传承平台（开发期工具链；运行时零依赖）",
+    "type": "project",
+    "require": {},
+    "require-dev": {
+        "phpstan/phpstan": "^2.0"
+    },
+    "config": {
+        "sort-packages": true
+    }
 }
