@@ -489,7 +489,9 @@ final class AiWorkflowService
                         'ai_workflow_completed',
                         'AI 整理任务已完成',
                         '任务 #' . $id . ' 已完成，请人工审核候选事实后再采用。',
-                        $link
+                        $link,
+                        false,
+                        'ai_workflow_completed:' . $id
                     );
                 }
             } catch (\Throwable $e) {

@@ -2107,6 +2107,7 @@ test('AI 收费订单（收款确认制）', function (): void {
         '_token' => $tokenJob,
         'service' => 'photo_restore',
         'media_id' => (string) $photo['id'],
+        'caption' => '第二单', // 不同内容产生不同幂等键，确保是独立订单而非复用第一单
         'consent' => '1',
     ]);
     $order2 = Db::fetch("SELECT * FROM ai_orders WHERE service_slug = 'photo_restore' ORDER BY id DESC LIMIT 1");
@@ -4175,6 +4176,81 @@ test('P5：public 家族下非成员不能导出会话转录，owner 可以', fu
     check($denied['status'] === 404, 'public 家族非成员不得导出会话转录');
     $allowed = api('GET', '/api/v1/ai/sessions/' . $sessionId . '/export', null, $ownerToken);
     check($allowed['status'] === 200, '家族 owner 应可导出会话转录');
+});
+
+echo "\n[Phase 6：订单与通知并发一致性]\n";
+
+test('P6：订单幂等键与通知去重列已迁移', function (): void {
+    foreach ([
+        ['ai_orders', 'idempotency_key'],
+        ['notifications', 'dedupe_key'],
+    ] as [$table, $column]) {
+        $found = (int) Db::value(
+            'SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?',
+            [$table, $column]
+        );
+        check($found === 1, '缺少列 ' . $table . '.' . $column);
+    }
+    $versions = array_column(Db::fetchAll("SELECT version FROM schema_migrations WHERE version LIKE '20261128_%'"), 'version');
+    foreach (['20261128_010', '20261128_011'] as $version) {
+        check(in_array($version, $versions, true), '缺少迁移版本 ' . $version);
+    }
+});
+
+test('P6：10 个并发请求用同一幂等键创建订单只产生一条订单', function (): void {
+    $key = 'p6-order-' . bin2hex(random_bytes(6));
+    $script = BASE_PATH . '/tests/concurrency/order-idempotency.php';
+    $processes = [];
+    for ($i = 0; $i < 10; $i++) {
+        $command = 'php ' . escapeshellarg($script) . ' ' . escapeshellarg($key) . ' 1 1';
+        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $pipes = [];
+        $handle = proc_open($command, $descriptors, $pipes);
+        check(is_resource($handle), '无法启动订单并发子进程');
+        $processes[] = [$handle, $pipes];
+    }
+    $ids = [];
+    foreach ($processes as [$handle, $pipes]) {
+        $out = trim((string) stream_get_contents($pipes[1]));
+        $err = trim((string) stream_get_contents($pipes[2]));
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $rc = proc_close($handle);
+        check($rc === 0, '订单并发子进程失败：' . $err);
+        $payload = json_decode($out, true);
+        check(is_array($payload) && isset($payload['id']), '订单并发输出无效：' . $out);
+        $ids[] = (int) $payload['id'];
+    }
+    check(count(array_unique($ids)) === 1, '并发幂等应返回同一订单 ID');
+    check(db_count('ai_orders', 'idempotency_key = ?', [$key]) === 1, '应只写入一条订单');
+});
+
+test('P6：10 个并发请求用同一去重键只产生一条站内通知', function (): void {
+    $key = 'p6-notify-' . bin2hex(random_bytes(6));
+    $script = BASE_PATH . '/tests/concurrency/notification-dedup.php';
+    $processes = [];
+    for ($i = 0; $i < 10; $i++) {
+        $command = 'php ' . escapeshellarg($script) . ' ' . escapeshellarg($key) . ' 1';
+        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $pipes = [];
+        $handle = proc_open($command, $descriptors, $pipes);
+        check(is_resource($handle), '无法启动通知并发子进程');
+        $processes[] = [$handle, $pipes];
+    }
+    $ids = [];
+    foreach ($processes as [$handle, $pipes]) {
+        $out = trim((string) stream_get_contents($pipes[1]));
+        $err = trim((string) stream_get_contents($pipes[2]));
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $rc = proc_close($handle);
+        check($rc === 0, '通知并发子进程失败：' . $err);
+        $payload = json_decode($out, true);
+        check(is_array($payload) && isset($payload['id']), '通知并发输出无效：' . $out);
+        $ids[] = (int) $payload['id'];
+    }
+    check(count(array_unique($ids)) === 1, '并发去重应返回同一通知 ID');
+    check(db_count('notifications', 'dedupe_key = ?', [hash('sha256', $key)]) === 1, '应只写入一条通知');
 });
 
 echo "\n========== 结果 ==========\n";
