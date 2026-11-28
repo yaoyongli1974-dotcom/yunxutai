@@ -59,4 +59,34 @@ PHP 8.5 的 `session_get_cookie_params()` 返回形状比 PHP 8.4 多出 `partit
 低。仅移除永不会触发的兜底值；PHP 8.4/8.5 的 `session_get_cookie_params()` 均保证 `samesite` 键存在，基线减少一条与代码删除一一对应。
 
 ### Result
-本地回归 PASS，待 CI 四矩阵复验。
+本地回归 PASS；推送后 CI run `46107303591` 四矩阵全绿，已闭环。
+
+## Fix #3
+
+### Failure
+Phase 4 交付后每个 matrix job 仍产生一条警告注解：`Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4, gitleaks/gitleaks-action@v2`。不影响步骤结论，但平台已移除 Node 20 兼容路径，属于必须补齐的遗留项。
+
+### Failed Workflow
+CI / tests (8.4|8.5 × mysql:8.4|mariadb:11) / check run 警告注解（run `46107555058`）。
+
+### Root Cause
+三个 third-party action 的 `action.yml` 仍声明 `node20` 运行时；`actions/setup-node` 步骤还在使用已 EOL 的 Node.js 20。不是代码缺陷或门禁配置错误。
+
+### Affected Files
+- `.github/workflows/ci.yml`（4 行版本号）
+- `docs/development/ci-fix/05_NODE24_ACTION_UPGRADE.md`（专项说明）
+- `docs/development/ci-fix/01_CI_FIX_LOG.md`（本报告）
+
+### Fix
+`actions/checkout@v4→v6`、`actions/setup-node@v4→v6`（`node-version: '20'→'24'`）、`gitleaks/gitleaks-action@v2→v3`。官方 v3 迁移说明确认 gitleaks 仅运行时变化、输入输出与行为不变；未改 matrix、门禁、allowlist、测试或业务代码。
+
+### Regression Test
+- 本地：workflow YAML 解析 PASS；本地 Node v24.15.0 下小程序 `node --check` PASS；`bash bin/test.sh` 128 通过 / 0 失败；`git diff --check` 无错误。
+- 远程：run `46108114407`（`dbefa1a`）completed/success，4/4 job 全绿、全部 step success；4 个 check run 注解数全部为 `0`。
+- 最终文档 run `46108326290`（`58ccf98`）再次全绿，注解仍为 `0`。
+
+### Risk
+低。checkout/setup-node 主版本升级由四矩阵实跑覆盖；gitleaks v3 官方说明为纯 Node 24 运行时迁移。回滚只需恢复 workflow 四处版本号，不涉及代码/基线/测试。
+
+### Result
+PASS（警告清零，四矩阵保持全绿）。

@@ -6,9 +6,10 @@
 |---|---|
 | 仓库 | `yaoyongli1974-dotcom/yunxutai` |
 | 分支 | `main` |
-| 最终修复提交 | `b2209708580241e4fa05908c95eb65c6ab7e640c` |
-| 最终验证 run | `46107303591` |
+| 代码修复提交（Fix #2） | `b2209708580241e4fa05908c95eb65c6ab7e640c` |
+| 本节原始验证 run | `46107303591`（当时最终验证；Node 24 升级前的历史 run） |
 | Run URL | https://github.com/yaoyongli1974-dotcom/yunxutai/actions/runs/46107303591 |
+| 最终交付 run | `46108326290`（commit `58ccf98`，见第 8 节） |
 | 触发方式 | push to main |
 | Run 结论 | `completed` / `success`（`gh run watch --exit-status` rc=0） |
 
@@ -78,3 +79,19 @@ CI 出现 Node.js 20 deprecated 注解（actions/checkout@v4、actions/setup-nod
 ## 7. 结论
 
 四矩阵全绿、全部 Step 通过、无取消/隐藏失败，Phase 4 验收条件中的 CI 复跑部分满足；最终交付结论见 `04_CI_RELEASE_READINESS.md`。
+
+## 8. 最终状态（Node 24 action 升级后）
+
+Fix #3 将 workflow 中的 action 升级为 Node 24 运行时后，重新获得四矩阵实跑结果：
+
+| 项 | 值 |
+|---|---|
+| 代码最终 HEAD | `58ccf98a9db75882371b1901d857f3725490964a`（其后仅有文档提交） |
+| 验收基线 run | `46108326290`（https://github.com/yaoyongli1974-dotcom/yunxutai/actions/runs/46108326290）；其后的文档 run 以最新为准 |
+| 结论 | `completed` / `success`，`gh run watch --exit-status` rc=0 |
+| 矩阵 | `tests (8.4, mysql:8.4)`、`tests (8.5, mysql:8.4)`、`tests (8.4, mariadb:11)`、`tests (8.5, mariadb:11)` 全部 success |
+| Step | 每个 job 全部 step 均 success，无 skipped / failure / cancelled |
+| Action 版本 | `actions/checkout@v6`、`actions/setup-node@v6`（Node 24）、`gitleaks/gitleaks-action@v3` |
+| 注解 | 4 个 check run 的 annotations 数全部为 `0`（Node.js 20 deprecated 警告已消失） |
+
+第 3 节的 step 列表与 `@v4` 名称是 Fix #3 之前的历史记录；最终 step 序列相同，仅 checkout/setup-node/gitleaks 三处版本变化。仓库无 branch protection/required checks 配置，CI 是唯一检查且已全绿。
