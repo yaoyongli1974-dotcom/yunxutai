@@ -95,6 +95,76 @@
 - 私密馆不进入列表、sitemap；公开馆可由馆主关闭搜索收录。
 - 数据导出/删除/撤回授权需人工核验，防止他人冒用。
 
+## CSP 路线图
+
+### 当前生效策略（Enforce）
+
+应用层在 `app/bootstrap.php:97` 对所有 PHP 响应发送一条 enforcing 的 `Content-Security-Policy`，指令如下（即当前唯一生效的策略）：
+
+| 指令 | 当前值 |
+| --- | --- |
+| `default-src` | `'self'` |
+| `img-src` | `'self' data: blob:` |
+| `media-src` | `'self'` |
+| `style-src` | `'self' 'unsafe-inline'` |
+| `script-src` | `'self'` |
+| `frame-ancestors` | `'self'` |
+| `base-uri` | `'self'` |
+| `form-action` | `'self'` |
+
+未显式列出的 `connect-src` / `frame-src` / `object-src` 等回退到 `default-src 'self'`（注意 `object-src` 当前**不是** `'none'`）。边缘层 `deploy/nginx.conf` 默认不额外下发 enforcing CSP；只有需要为绕过 PHP 的静态响应/错误页补发时才使用与应用完全一致的同一条值。
+
+### 提议的 Report-Only 策略
+
+仅上报、不阻断，示例见 `deploy/nginx.conf` 的注释（占位端点须替换为真实收集地址）：
+
+```
+default-src 'self';
+img-src 'self' data: blob:;
+media-src 'self' blob:;
+style-src 'self';
+script-src 'self';
+connect-src 'self';
+frame-src 'self';
+object-src 'none';
+frame-ancestors 'self';
+base-uri 'self';
+form-action 'self';
+report-uri /csp-report;
+report-to csp
+```
+
+与当前策略的差异：去掉 `style-src` 的 `'unsafe-inline'`；`media-src` 增加 `blob:`（本地预览/AI 短片可能用到）；显式声明 `connect-src`、`frame-src`、`object-src 'none'`；加入 `report-uri` / `report-to` 上报端点（`report-to` 需配套 `Report-To` 响应头）。
+
+### 评估步骤（采集破坏性为零）
+
+在预发布/生产边缘以 `Content-Security-Policy-Report-Only` 启用上面的策略，逐项审查上报的违规，再决定是否收紧：
+
+- `script-src`：确认为 `'self'`，排查是否有内联脚本、动态 `eval`/`new Function` 或第三方脚本；任何新增来源必须用 nonce/hash 或明确列入白名单并登记理由。
+- `style-src`：目标是移除 `'unsafe-inline'`；排查模板内联 `style=` 属性与 `<style>` 块，逐步改为外部样式或 nonce/hash。
+- `img-src`：确认 `'self' data: blob:` 覆盖头像/纪念馆封面/核验缩略图与 data URL，**不放开通配符或 `https:`**。
+- `media-src`：确认 `'self' blob:` 覆盖 `/media/{id}` 鉴权流与本地预览；裁剪不必要的来源。
+- `connect-src`：显式为 `'self'`；核对 AJAX、上传、AI 异步任务与统计上报是否同源，第三方 API 只允许已披露的域名且不得携带敏感参数。
+- `frame-src`：显式为 `'self'` 或 `'none'`，确认后台与公开页没有需要嵌入的第三方框架。
+- `object-src`：设为 `'none'`（禁插件/嵌入对象），确认没有 PDF/Flash 类 `<object>`/`<embed>` 依赖；PDF 走下载而非内嵌。
+- `base-uri`：保持 `'self'`，防止 `<base>` 劫持相对 URL。
+- `form-action`：保持 `'self'`，防止表单被劫持到外部域名。
+- `frame-ancestors`：保持 `'self'`，与 `X-Frame-Options: SAMEORIGIN` 对齐；若需第三方嵌入须单独评估并留审批记录。
+
+### 约束与收敛计划
+
+- **禁止 `'unsafe-eval'`**：`script-src` 不得加入 `'unsafe-eval'`，除非有书面理由（例如某个不可替代的依赖必须动态求值），并经评审登记后使用 nonce/hash 或 `strict-dynamic` 限定范围。
+- **减少 `'unsafe-inline'`**：当前仅 `style-src` 使用；计划按「外部样式表 → nonce/hash → 彻底移除」推进，每步都以 Report-Only 违规量降到零为门槛。`script-src` 已不含 `'unsafe-inline'`，保持不回退。
+- **诚实说明**：本地开发/验收环境**没有采集到任何真实 CSP 违规遥测数据**；以上策略与评估项是基于现有代码与响应头的静态推导，尚未经过生产流量验证，必须在带真实流量的 Report-Only 阶段收集数据后再定稿。
+
+### 切换到 Enforce
+
+1. 边缘开启 `Content-Security-Policy-Report-Only`（示例见 `deploy/nginx.conf`），端点指向真实收集服务。
+2. 观察足够长周期（覆盖主要用户路径与后台操作），按上节逐指令把业务相关违规降到零。
+3. 回归 Web、管理端、小程序 API、上传、媒体与 AI 流程，确认无阻断。
+4. 将收敛后的策略写入 `app/bootstrap.php:97` 的 enforcing 头；边缘继续只保留（或不下发）一致的安全头，**不要新增第二条 enforcing CSP**。
+5. 保留 Report-Only 运行一段时间作为回归防线，确认无新增违规后再移除，并把 CSP 纳入发布检查表。
+
 ## 已知边界（MVP）
 
 - 无邮件/短信验证，邮箱真实性依赖后续运营核验。

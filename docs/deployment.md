@@ -207,6 +207,7 @@ tar xzf "$B/verifications.tar.gz" -C storage
 - [ ] `APP_DEBUG=false`，错误不显示堆栈。
 - [ ] `APP_KEY` 随机且未提交到版本库。
 - [ ] HTTPS 全站，HTTP 跳转，HSTS；边缘补发的 CSP 与应用值一致且不重复（仅绕过 PHP 的静态响应），HTTPS 下会话 Cookie 带 `Secure`。
+- [ ] CSP 路线图：应用层已下发 enforcing CSP，**不要在边缘再叠加 enforcing 头（避免重复/冲突）**；先在边缘启用 `Content-Security-Policy-Report-Only`（示例见 `deploy/nginx.conf`，占位上报端点须替换），回归 Web / 管理端 / 小程序 API / 上传 / 媒体 / AI 全链路确认无阻断并收集违规，再切换为 Enforce（详见 `docs/security.md`「CSP 路线图」）。
 - [ ] Web 根目录仅 `public/`；`storage/` 不可 URL 直达。
 - [ ] 数据库最小权限、强密码、仅内网访问。
 - [ ] 上传限制与 MIME 校验生效（尝试上传 `.php` 应被拒绝）。

@@ -280,7 +280,12 @@ final class AiWorkflowService
                 ], "id = ? AND status = 'processing' AND lease_until IS NOT NULL AND lease_until < NOW()
                     AND locked_by = ? AND lock_version = ?", [$id, (string) $row['locked_by'], (int) $row['lock_version']]);
                 if ($ok === 1) {
-                    Audit::log('ai.workflow.timeout', 'ai_workflow', $id, ['previous_worker' => (string) $row['locked_by']]);
+                    Audit::log('ai.workflow.timeout', 'ai_workflow', $id, [
+                        'workflow_id' => $id,
+                        'previous_worker' => (string) $row['locked_by'],
+                        'worker_id' => (string) $row['locked_by'],
+                        'error_code' => 'workflow_timeout',
+                    ]);
                 }
                 continue;
             }
@@ -304,8 +309,11 @@ final class AiWorkflowService
             }
             $recovered++;
             Audit::log('ai.workflow.lease_expired', 'ai_workflow', $id, [
+                'workflow_id' => $id,
                 'previous_worker' => (string) $row['locked_by'],
+                'worker_id' => (string) $row['locked_by'],
                 'retry' => $retry,
+                'error_code' => 'lease_expired',
             ]);
         }
         $retried = 0;
@@ -495,7 +503,8 @@ final class AiWorkflowService
                     );
                 }
             } catch (\Throwable $e) {
-                error_log('ai.workflow.notify failed [workflow=' . $id . ']: ' . $e->getMessage());
+                error_log('ai.workflow.notify failed [workflow=' . $id . '][worker=' . $workerId
+                    . '][error_code=' . get_class($e) . ']: ' . hash('sha256', $e->getMessage()));
             }
             return self::find($id) ?? $workflow;
         } catch (Throwable $e) {
@@ -560,6 +569,7 @@ final class AiWorkflowService
             });
             Audit::log('ai.workflow.failed', 'ai_workflow', $id, [
                 'class' => $class, 'retry' => $retry, 'error_hash' => hash('sha256', $e->getMessage()),
+                'workflow_id' => $id, 'error_code' => $class,
             ]);
             throw $e;
         }

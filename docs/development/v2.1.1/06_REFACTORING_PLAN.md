@@ -74,3 +74,7 @@
 ## 4. 当前 Phase 0 交付状态
 
 已完成：`00_BASELINE_REPORT.md`、`01_CURRENT_ARCHITECTURE.md`、`02_AI_WORKFLOW_ANALYSIS.md`、`03_SECURITY_AND_PERMISSION_AUDIT.md`、`04_DATABASE_AND_TRANSACTION_AUDIT.md`、`05_TEST_BASELINE.md`、`06_REFACTORING_PLAN.md`、`RESOURCE_PERMISSION_MATRIX.md`、`MODERATION_CONTROLLER_ANALYSIS.md`。Phase 8 的具体拆分方案已依据 `MODERATION_CONTROLLER_ANALYSIS.md` 细化：保持 7 个公开 action 不变，仅抽离 `BatchProcessor`、`ModerationQueries`、`IdsParser` 三个内部协作者；测试模块化按 27 个既有分节增量迁移并保持 145 项不变。Phase 0 不修改业务代码；提交后等待批准进入 Phase 1。
+
+## 5. Phase 9 执行记录
+
+CSP 采用零运行时变更的注释版 Report-Only 示例，并写入 `docs/security.md` 路线图与 `docs/deployment.md` 回归清单；未采集真实违规遥测，未切换 Enforce。数据生命周期治理写入 `docs/compliance.md` §9，区分 CONFIRMED 与 OPEN。监控日志补齐 `workflow_id/worker_id/error_code`，敏感异常文本以 sha256 记录。新增隔离性能 seeder 与全规模合成数据报告（EXPLAIN/计时见 `PERFORMANCE_TEST_REPORT.md`），防写保护拒绝 `jidian`/`jidian_test`，隔离库已删除。真机 27 项全部标注「未执行」，`SECURITY_FINAL_REPORT.md` 列出 OPEN/PARTIAL 风险。全量门禁：166/0 测试、PHPStan（仅修正 seeder PHPDoc 后）`[OK] No errors`、其余门禁 rc=0。详见 `17_PHASE9_SECURITY_PERFORMANCE_REPORT.md`。
