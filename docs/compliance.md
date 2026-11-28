@@ -80,3 +80,48 @@
 - [ ] 增值服务合同、价格、交付与退费规则明确。
 - [ ] 停止运营与数据处置预案完成。
 - [ ] 等保/备案/ICP 等属地要求确认（如适用）。
+
+## 9. 数据治理收口（任务书 P1，基于实际代码）
+
+> 标注：**CONFIRMED** = 有代码证据；**OPEN** = 需补代码或人工流程，当前未实现或未量化。本节只描述现状，不构成已完成承诺。
+> 证据：`AccountController::requestData`、`DataRequest`、`Admin/DataRequestController::handle`、`ArchiveService::requestDelete/approveDelete`、`bin/archive-cleanup.php`、`docs/development/v2.1.0/04_DATA_RETENTION_POLICY.md`。
+
+### 9.1 数据生命周期分层
+
+| 层次 | 当前实现 | 状态 |
+|---|---|---|
+| 业务逻辑删除（状态标记） | `archives.status=deleted/delete_requested` + `deleted_at`、`family_persons.deleted_at`、`users.status=disabled`；审批前可回滚 | CONFIRMED |
+| 数据库行物理清理 | 仅档案 worker 删除 `archive_files` 行（`archive-cleanup.php:113`）；人物/纪念馆/账号软删除后无统一物理清理任务 | 部分 CONFIRMED，其余 OPEN |
+| 媒体文件物理清理（归档异步队列） | `approveDelete(true)` 在事务内把每个 `archive_files.(file_id, storage_key)` 入 `archive_cleanup_queue`；`bin/archive-cleanup.php` 幂等领取（`FOR UPDATE SKIP LOCKED`，`attempts+1`，默认上限 3），核对 `archives.status='deleted'`，删除原文件+处理后文件，共享 `storage_key` 只关单不删，失败回 `pending/failed` 并写审计 | CONFIRMED |
+| 缓存/授权即时失效 | 改密 `ApiAuth::revokeAllFor`；成员退出/角色变更 `Policy::clearCache()` | CONFIRMED |
+| 授权缓存失效缺口 | `Admin/UserController::updateStatus()` 禁用用户未调用 `Policy::clearCache()`（`Policy::$roles` 滞留） | OPEN（P1） |
+| 备份生命周期 | `bin/backup.php --keep=14`（默认保留 14 份每日），`manifest.json` 记录 sha256/bytes，可选 `BACKUP_ENCRYPTION_KEY` AES-256-CBC 加密 | CONFIRMED |
+| 审计/法定留存 | `audit_logs` 只追加、不做物理删除；最小化保留期需人工确认 | 机制 CONFIRMED，期限 OPEN |
+
+### 9.2 数据导出范围与保护措施
+
+- **授权**：申请仅 `export/delete/revoke` 三类，带纪念馆 ID 时校验申请人为 `owner`，限流 3 次/天；档案导出经 `getVisible()` + `Policy::require('data.export')`，该能力限 `owner/admin`（`Policy.php:133`）；无登录则 401。CONFIRMED
+- **无跨用户数据**：`exportBundle()` 只返回当前用户有权访问的单一档案，数据为元数据与文件清单（文件名、mime、sha256、大小）+ 标签/人物/版本，不含文件二进制。CONFIRMED
+- **审计**：`data_request.create`、`admin.data_request.update`、`archive.exported` 均写 `audit_logs`。CONFIRMED
+- **回执**：后台 `handle()` 仅登记 `processing/done/rejected` 并发邮件回执，明确「本次操作不会删除任何数据」，实际导出/删除/撤回需身份核验后离线执行。CONFIRMED（流程），自动化执行 OPEN
+- **短期有效下载链接 / 随机文件名 / 到期清理**：当前导出为 JSON 响应（`Response::json`），无短链下载、无随机文件名、无统一过期清理器；权限矩阵「短期有效」仅为推断（I）。OPEN
+- 导出文件保留期限未定义（`04_DATA_RETENTION_POLICY.md` §1/§4 标 OPEN）。OPEN
+
+### 9.3 用户可发起的数据操作（支持状态）
+
+| 操作 | 实现证据 | 状态 |
+|---|---|---|
+| 账号删除申请 | `AccountController::requestData(type=delete)` → `data_requests`，后台 `handle` 登记状态 | 入口 CONFIRMED；账号物理删除/注销OPEN |
+| 家族退出 | `FamilyService::leave()` / `FamilyController::leave()`，退出后角色授权即时失效 | CONFIRMED；退出后历史数据物理清理 OPEN |
+| 人物删除 | `GenealogyService` 置 `deleted_at`、`privacy=private`、`verification_status=none` | 软删除 CONFIRMED；物理清理 OPEN |
+| 纪念馆删除 | 仅后台停用/恢复，无物理删除流程 | OPEN |
+| 档案删除 | `requestDelete → delete_requested → approveDelete(true) → deleted → 异步队列清理文件/行` | CONFIRMED |
+| AI 任务删除 / 同意撤回 | `AiWorkflowService::cancel()`、`revokeSessionConsent()`；`consent_revoked` 拒绝新任务并取消在途任务 | CONFIRMED；已生成内容保留期 OPEN |
+| 分享/邀请 token 撤销 | `FamilyService::revokeInvitation()`、`Invitation::revoke()`、`MemberController::revokeInvitation()`，链接立即失效 | CONFIRMED；纪念馆邀请 legacy 明文 token 回退未退役 OPEN |
+
+### 9.4 备份删除处理（有意保留例外）
+
+- 归档清理 worker 同时删除处理后文件与原副本（`original_storage_key` 与 `storage_key`，`archive-cleanup.php:104-111`），并删除对应 `archive_files` 行，避免残留可恢复的隐私数据。CONFIRMED
+- 备份副本**不随单次档案删除即时清除**，按 `bin/backup.php --keep=14` 的 14 份每日滚动淘汰策略自然过期。CONFIRMED
+- 该差异为**有意保留例外**：备份是灾难恢复快照，删除请求不追溯改写历史备份点。对外不得宣称「删除即全副本彻底清除」；如需在备份中彻底清除个人信息，须等待对应备份自然滚出淘汰，并配合密钥/介质管理。OPEN（彻底清除时限与口径）
+- 备份加密已实现（`BACKUP_ENCRYPTION_KEY` / AES-256-CBC，见 `BACKUP_RESTORE_DRILL.md`）；异地同步、密钥托管与 RPO/RTO 分钟级量化仍 OPEN。

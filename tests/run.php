@@ -32,6 +32,7 @@ use App\Models\Tribute;
 use App\Models\Verification;
 
 require BASE_PATH . '/tests/Support/MockRespServer.php';
+require BASE_PATH . '/tests/Support/Harness.php';
 
 $baseUrl = rtrim((string) (getenv('BASE_URL') ?: 'http://127.0.0.1:8110'), '/');
 $cookieJar = sys_get_temp_dir() . '/jingsi-test-cookies-' . getmypid() . '.txt';
@@ -40,220 +41,6 @@ $cookieJar = sys_get_temp_dir() . '/jingsi-test-cookies-' . getmypid() . '.txt';
 $passed = 0;
 $failed = 0;
 $failures = [];
-
-function test(string $name, callable $fn): void
-{
-    global $passed, $failed, $failures;
-    try {
-        $fn();
-        $passed++;
-        echo "  ✓ {$name}\n";
-    } catch (Throwable $e) {
-        $failed++;
-        $failures[] = $name . ': ' . $e->getMessage();
-        echo "  ✗ {$name}\n      " . $e->getMessage() . "\n";
-    }
-}
-
-function check(bool $condition, string $message): void
-{
-    if (!$condition) {
-        throw new RuntimeException($message);
-    }
-}
-
-function check_contains(string $haystack, string $needle, string $message = ''): void
-{
-    check(str_contains($haystack, $needle), $message !== '' ? $message : '缺少内容：' . $needle);
-}
-
-function check_not_contains(string $haystack, string $needle, string $message = ''): void
-{
-    check(!str_contains($haystack, $needle), $message !== '' ? $message : '不应出现：' . $needle);
-}
-
-/**
- * API 请求助手：JSON body + Bearer token，返回解析后的数组。
- * 使用独立 cookie jar，避免继承 web 测试的会话状态（API 客户端应只依赖 Bearer token）。
- * @param array<string,mixed>|null $json
- * @return array{status:int,data:mixed,raw:string}
- */
-function api(string $method, string $path, ?array $json = null, ?string $token = null): array
-{
-    global $baseUrl;
-    static $apiCookieJar = null;
-    $apiCookieJar ??= sys_get_temp_dir() . '/jingsi-test-api-cookies-' . getmypid() . '.txt';
-
-    $command = [
-        'curl', '-sS', '--max-time', '25',
-        '-b', $apiCookieJar, '-c', $apiCookieJar,
-        '-X', $method,
-        '-H', 'Accept: application/json',
-        '-H', 'Content-Type: application/json',
-        '-w', "\n__STATUS__%{http_code}",
-    ];
-    if ($token !== null) {
-        $command[] = '-H';
-        $command[] = 'Authorization: Bearer ' . $token;
-    }
-    if ($json !== null) {
-        $command[] = '--data';
-        $command[] = json_encode($json, JSON_UNESCAPED_UNICODE);
-    }
-    $command[] = $baseUrl . $path;
-
-    $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-    $process = proc_open($command, $descriptors, $pipes);
-    if (!is_resource($process)) {
-        fwrite(STDERR, "无法启动 curl\n");
-        exit(1);
-    }
-    $body = stream_get_contents($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    proc_close($process);
-    if ($stderr !== '' && trim($stderr) !== '') {
-        fwrite(STDERR, 'curl: ' . trim($stderr) . "\n");
-    }
-    if (!preg_match('/__STATUS__(\d+)\s*$/', (string) $body, $m)) {
-        return ['status' => 0, 'data' => null, 'raw' => (string) $body];
-    }
-    $raw = trim(substr((string) $body, 0, -strlen($m[0])));
-    $decoded = json_decode($raw, true);
-    return ['status' => (int) $m[1], 'data' => $decoded, 'raw' => $raw];
-}
-
-/** 从 API 响应中提取 Bearer token */
-function api_token_of(array $response): string
-{
-    return (string) ($response['data']['data']['token'] ?? '');
-}
-
-/**
- * @param array<string, string>|null $form
- * @param array<string, string> $files
- * @return array{status:int,body:string,headers:string,location:string,url:string}
- */
-function http(string $method, string $path, ?array $form = null, array $files = [], bool $follow = true): array
-{
-    global $baseUrl, $cookieJar;
-
-    $headerFile = sys_get_temp_dir() . '/jingsi-test-headers-' . getmypid() . '.txt';
-    $command = [
-        'curl', '-sS', '--max-time', '25',
-        '-b', $cookieJar, '-c', $cookieJar,
-        '-D', $headerFile,
-        '-o', '-',
-        '-w', "\n__STATUS__%{http_code}\n__URL__%{url_effective}",
-    ];
-    if ($follow) {
-        $command[] = '-L';
-    }
-
-    if ($files !== []) {
-        foreach ($form ?? [] as $key => $value) {
-            $command[] = '-F';
-            $command[] = $key . '=' . $value;
-        }
-        foreach ($files as $field => $file) {
-            $command[] = '-F';
-            $command[] = $field . '=@' . $file;
-        }
-    } elseif ($form !== null) {
-        foreach ($form as $key => $value) {
-            if (is_array($value)) {
-                foreach ($value as $item) {
-                    $command[] = '--data-urlencode';
-                    $command[] = $key . '[]=' . $item;
-                }
-                continue;
-            }
-            $command[] = '--data-urlencode';
-            $command[] = $key . '=' . $value;
-        }
-    }
-
-    $command[] = $baseUrl . $path;
-
-    $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-    $process = proc_open($command, $descriptors, $pipes);
-    if (!is_resource($process)) {
-        throw new RuntimeException('无法执行 curl');
-    }
-    $output = (string) stream_get_contents($pipes[1]);
-    $error = (string) stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    $exit = proc_close($process);
-    if ($exit !== 0) {
-        throw new RuntimeException('curl 失败：' . $error);
-    }
-
-    $status = 0;
-    $effectiveUrl = '';
-    if (preg_match('/\n__STATUS__(\d{3})\n__URL__(.+)$/s', $output, $matches)) {
-        $status = (int) $matches[1];
-        $effectiveUrl = trim($matches[2]);
-        $output = substr($output, 0, -strlen($matches[0]));
-    }
-    $headers = is_file($headerFile) ? (string) file_get_contents($headerFile) : '';
-    @unlink($headerFile);
-    $location = '';
-    if (preg_match('/^Location:\s*(.+)$/mi', $headers, $matches)) {
-        $location = trim($matches[1]);
-    }
-
-    return ['status' => $status, 'body' => $output, 'headers' => $headers, 'location' => $location, 'url' => $effectiveUrl];
-}
-
-function effective_path(string $url): string
-{
-    $path = parse_url($url, PHP_URL_PATH);
-    return is_string($path) ? $path : '/';
-}
-
-function csrf_token(string $path): string
-{
-    $response = http('GET', $path);
-    check($response['status'] === 200, "页面 {$path} 返回 " . $response['status']);
-    if (!preg_match('/name="_token"\s+value="([a-f0-9]{32,})"/', $response['body'], $matches)) {
-        throw new RuntimeException("页面 {$path} 未找到 CSRF token");
-    }
-    return $matches[1];
-}
-
-function reset_session(): void
-{
-    global $cookieJar;
-    @unlink($cookieJar);
-}
-
-function login(string $email, string $password): void
-{
-    reset_session();
-    $token = csrf_token('/login');
-    $response = http('POST', '/login', [
-        '_token' => $token,
-        'email' => $email,
-        'password' => $password,
-        'next' => '/dashboard',
-    ]);
-    check($response['status'] === 200, '登录后未进入页面，状态 ' . $response['status']);
-    check(effective_path($response['url']) === '/dashboard', '登录失败，停留在 ' . effective_path($response['url']));
-}
-
-function logout(): void
-{
-    $token = csrf_token('/dashboard');
-    http('POST', '/logout', ['_token' => $token]);
-    reset_session();
-}
-
-function db_count(string $table, string $where = '1 = 1', array $params = []): int
-{
-    return (int) Db::value("SELECT COUNT(*) FROM {$table} WHERE {$where}", $params);
-}
 
 echo "云叙台 · 集成测试\n";
 echo "目标：{$baseUrl}\n\n";
@@ -2107,6 +1894,7 @@ test('AI 收费订单（收款确认制）', function (): void {
         '_token' => $tokenJob,
         'service' => 'photo_restore',
         'media_id' => (string) $photo['id'],
+        'caption' => '第二单', // 不同内容产生不同幂等键，确保是独立订单而非复用第一单
         'consent' => '1',
     ]);
     $order2 = Db::fetch("SELECT * FROM ai_orders WHERE service_slug = 'photo_restore' ORDER BY id DESC LIMIT 1");
@@ -3582,14 +3370,17 @@ test('C2：AI 事实候选记录完整来源与主体字段', function (): void 
     $owner = make_family_user('c-fact');
     $familyId = \App\Services\FamilyService::create($owner, '事实来源家族', 'c-fact-' . bin2hex(random_bytes(3)));
     $personId = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '来源人物', 'is_deceased' => true]);
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, [
+        'title' => '事实来源档案', 'privacy' => 'private',
+    ]);
     $factId = \App\Services\AiWorkflowService::addFactCandidate(
         $owner, $familyId, 'date', '1990年3月迁往南方', 'ai_extraction',
-        null, $personId, 0.75, '原文：1990年3月迁往南方', 101, 202, 'person', $personId
+        $archiveId, $personId, 0.75, '原文：1990年3月迁往南方', $archiveId, null, 'person', $personId
     );
     $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
     check($fact !== null, '事实未入库');
     check((string) $fact['source_excerpt'] === '原文：1990年3月迁往南方', '来源摘录未写入');
-    check((int) $fact['source_archive_id'] === 101 && (int) $fact['source_version_id'] === 202, '来源档案/版本未写入');
+    check((int) $fact['source_archive_id'] === $archiveId, '来源档案未写入');
     check((string) $fact['subject_type'] === 'person' && (int) $fact['subject_id'] === $personId, '主体字段未写入');
     check((string) $fact['verification_status'] === 'pending', 'AI 事实不得自动确认');
 });
@@ -3772,6 +3563,543 @@ test('E：10 个 Worker 并发领取同一任务只有一个有效执行者', fu
     $workflow = Db::fetch('SELECT status, locked_by FROM ai_workflows WHERE id = ? LIMIT 1', [$id]);
     check($workflow !== null && $workflow['status'] === 'processing', '任务应处于 processing');
     check(str_starts_with((string) $workflow['locked_by'], 'e-worker-'), 'locked_by 应为并发 Worker 之一');
+});
+
+echo "\n[v2.1.1 Phase 1：AI 工作流真实步骤状态机]\n";
+
+test('P1：步骤由真实执行驱动，成功时审核步骤进入待审核且写入状态历史', function (): void {
+    $owner = make_family_user('p1-step');
+    $familyId = \App\Services\FamilyService::create($owner, '步骤状态家族', 'p1-step-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1990年3月，父亲从北方迁往南方。',
+    ], 'p1-step-' . bin2hex(random_bytes(4)));
+    $result = \App\Services\AiWorkflowService::process($id, 'p1-step-worker');
+    check((string) $result['status'] === 'completed', '工作流应完成');
+    $steps = \App\Services\AiWorkflowService::steps($id);
+    check(count($steps) === 3, '应有 3 个步骤');
+    $byName = [];
+    foreach ($steps as $step) {
+        $byName[(string) $step['name']] = (string) $step['status'];
+    }
+    check(($byName['validate_input'] ?? '') === 'completed', '输入校验步骤应完成');
+    check(($byName['extract_candidates'] ?? '') === 'completed', '提取步骤应完成');
+    check(($byName['review_draft'] ?? '') === 'awaiting_review', '审核步骤应待人工审核，不能自动完成');
+    check(db_count('ai_workflow_step_transitions', 'workflow_id = ?', [$id]) >= 3, '应记录步骤转换历史');
+    check(
+        db_count('ai_workflow_step_transitions', "workflow_id = ? AND new_status = 'awaiting_review'", [$id]) === 1,
+        '应记录一次进入待审核的转换'
+    );
+});
+
+test('P1：人工审核步骤只能从待审核推进，重复审核被拒绝', function (): void {
+    $owner = make_family_user('p1-review');
+    $familyId = \App\Services\FamilyService::create($owner, '步骤审核家族', 'p1-review-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'biography_draft', [
+        'text' => '祖父是一位木匠，1920年生于南方。',
+    ], 'p1-review-' . bin2hex(random_bytes(4)));
+    \App\Services\AiWorkflowService::process($id, 'p1-review-worker');
+    $reviewStep = null;
+    foreach (\App\Services\AiWorkflowService::steps($id) as $step) {
+        if ((string) $step['name'] === 'review_draft') {
+            $reviewStep = $step;
+        }
+    }
+    check($reviewStep !== null, '缺少审核步骤');
+    \App\Services\AiWorkflowService::reviewStep($owner, (int) $reviewStep['id'], 'approved');
+    check(
+        (string) Db::value('SELECT status FROM ai_workflow_steps WHERE id = ?', [(int) $reviewStep['id']]) === 'approved',
+        '审核通过后状态应为 approved'
+    );
+    try {
+        \App\Services\AiWorkflowService::reviewStep($owner, (int) $reviewStep['id'], 'rejected');
+        check(false, '已完成审核不应再次变更');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 409, '重复审核应返回 409');
+    }
+});
+
+test('P1：未执行步骤不能被伪造成已完成', function (): void {
+    $owner = make_family_user('p1-fake');
+    $familyId = \App\Services\FamilyService::create($owner, '防伪造家族', 'p1-fake-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1900年，家族迁居北方。',
+    ], 'p1-fake-' . bin2hex(random_bytes(4)));
+    $first = \App\Services\AiWorkflowService::steps($id)[0] ?? null;
+    check($first !== null, '缺少步骤');
+    // 人为把首步置为 completed，模拟“未执行却已完成”的脏状态。
+    Db::update('ai_workflow_steps', ['status' => 'completed'], 'id = ?', [(int) $first['id']]);
+    try {
+        \App\Services\AiWorkflowService::process($id, 'p1-fake-worker');
+        check(false, '非法步骤状态应阻止执行');
+    } catch (RuntimeException $e) {
+        check(str_contains($e->getMessage(), '状态不允许执行'), '拒绝原因应为非法状态转换');
+    }
+    check((string) Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) !== 'completed', '工作流不应被标记完成');
+    check(
+        (int) Db::value("SELECT COUNT(*) FROM ai_workflow_steps WHERE workflow_id = ? AND status = 'completed'", [$id]) === 1,
+        '不应批量把其余步骤标为完成'
+    );
+});
+
+test('P1：取消工作流时步骤进入 cancelled 并记录转换', function (): void {
+    $owner = make_family_user('p1-cancel');
+    $familyId = \App\Services\FamilyService::create($owner, '取消状态家族', 'p1-cancel-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1995年，家族建立了第一间作坊。',
+    ], 'p1-cancel-' . bin2hex(random_bytes(4)));
+    \App\Services\AiWorkflowService::cancel($owner, $id);
+    check(
+        db_count('ai_workflow_steps', "workflow_id = ? AND status = 'cancelled'", [$id]) === 3,
+        '取消时全部步骤应为 cancelled'
+    );
+    check(
+        db_count('ai_workflow_step_transitions', "workflow_id = ? AND new_status = 'cancelled'", [$id]) === 3,
+        '取消应记录 3 次步骤转换'
+    );
+});
+
+test('P1：任务状态 API 返回真实步骤进度与可执行动作', function (): void {
+    $owner = make_family_user('p1-api');
+    $familyId = \App\Services\FamilyService::create($owner, '状态 API 家族', 'p1-api-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'biography_draft', [
+        'text' => '曾祖母生于 1910 年，擅长刺绣。',
+    ], 'p1-api-' . bin2hex(random_bytes(4)));
+    $token = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $owner['email'], 'password' => 'FamilyTest@123',
+    ]));
+    check($token !== '', '前置：应取得 token');
+    $response = api('GET', '/api/v1/ai/workflows/' . $id, null, $token);
+    check($response['status'] === 200, '查询任务状态应 200');
+    $data = $response['data']['data'] ?? [];
+    check(isset($data['workflow']['step_total']) && (int) $data['workflow']['step_total'] === 3, '应返回步骤总数');
+    check(isset($data['workflow']['progress']), '应返回进度');
+    check(array_key_exists('can_cancel', $data['workflow']), '应返回 can_cancel');
+    check(array_key_exists('deadline_at', $data['workflow']), '应返回 deadline_at');
+    check(is_array($data['steps'] ?? null), '应返回步骤列表');
+});
+
+echo "\n[Phase 2：工作流截止时间与超时]\n";
+
+test('P2：AI 超时/租约/重试配置有合法上下限', function (): void {
+    $specs = [
+        ['ai.provider_timeout_seconds', 5, 600],
+        ['ai.workflow_timeout_seconds', 60, 86400],
+        ['ai.step_timeout_seconds', 5, 3600],
+        ['ai.worker_lease_seconds', 60, 7200],
+        ['ai.max_retries', 0, 10],
+        ['ai.retry_backoff_seconds', 1, 3600],
+    ];
+    foreach ($specs as [$key, $min, $max]) {
+        $value = (int) config($key, -1);
+        check($value >= $min && $value <= $max, '配置越界：' . $key . '=' . $value);
+    }
+});
+
+test('P2：创建任务写入截止时间，状态 API 返回真实 deadline', function (): void {
+    $owner = make_family_user('p2-deadline');
+    $familyId = \App\Services\FamilyService::create($owner, '截止家族', 'p2-dl-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', ['text' => '家族资料'], 'p2-dl');
+    $row = Db::fetch('SELECT * FROM ai_workflows WHERE id = ? LIMIT 1', [$id]);
+    check($row !== null && !empty($row['deadline_at']), '任务应写入 deadline_at');
+    check(strtotime((string) $row['deadline_at']) > time(), '截止时间应在未来');
+    check((int) $row['workflow_timeout_seconds'] > 0, '应记录工作流超时预算');
+
+    $token = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $owner['email'], 'password' => 'FamilyTest@123',
+    ]));
+    $detail = api('GET', '/api/v1/ai/workflows/' . $id, null, $token);
+    check($detail['status'] === 200, '工作流详情应 200');
+    check(($detail['data']['data']['workflow']['deadline_at'] ?? null) === $row['deadline_at'], 'API 应返回真实 deadline_at');
+});
+
+test('P2：过期任务不可领取，租约超时回收时按 workflow_timeout 取消', function (): void {
+    $owner = make_family_user('p2-expire');
+    $familyId = \App\Services\FamilyService::create($owner, '过期家族', 'p2-exp-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', ['text' => '过期资料'], 'p2-exp');
+    Db::update('ai_workflows', ['deadline_at' => date('Y-m-d H:i:s', time() - 10)], 'id = ?', [$id]);
+    $claimed = \App\Services\AiWorkflowService::claimStrict('p2-worker', 50);
+    $ids = array_map('intval', array_column($claimed, 'id'));
+    check(!in_array($id, $ids, true), '已过期任务不应被领取');
+
+    Db::update('ai_workflows', [
+        'status' => 'processing',
+        'locked_by' => 'p2-worker',
+        'lease_until' => date('Y-m-d H:i:s', time() - 10),
+        'lock_version' => 1,
+    ], 'id = ?', [$id]);
+    \App\Services\AiWorkflowService::recoverExpired();
+    $after = Db::fetch('SELECT status, failure_class FROM ai_workflows WHERE id = ? LIMIT 1', [$id]);
+    check($after !== null && (string) $after['status'] === 'cancelled', '过期任务应被取消');
+    check((string) $after['failure_class'] === 'workflow_timeout', '失败分类应为 workflow_timeout');
+});
+
+test('P2：执行期发现全局超时后停止且不写入步骤结果', function (): void {
+    $owner = make_family_user('p2-stop');
+    $familyId = \App\Services\FamilyService::create($owner, '停止家族', 'p2-stop-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', ['text' => '停止资料'], 'p2-stop');
+    $claimed = \App\Services\AiWorkflowService::claimStrict('p2-worker-b', 50);
+    $token = null;
+    foreach ($claimed as $row) {
+        if ((int) $row['id'] === $id) {
+            $token = (int) $row['lock_version'];
+            break;
+        }
+    }
+    check($token !== null, '任务应被领取');
+    Db::update('ai_workflows', ['deadline_at' => date('Y-m-d H:i:s', time() - 1)], 'id = ?', [$id]);
+    try {
+        \App\Services\AiWorkflowService::process($id, 'p2-worker-b', $token);
+        check(false, '超时任务不应继续完成');
+    } catch (RuntimeException $e) {
+        check(str_contains($e->getMessage(), 'workflow_timeout'), '拒绝原因应为 workflow_timeout');
+    }
+    $after = Db::fetch('SELECT status, failure_class, retry_count FROM ai_workflows WHERE id = ? LIMIT 1', [$id]);
+    check($after !== null && (string) $after['failure_class'] === 'workflow_timeout', '应记录超时失败分类');
+    check((int) $after['retry_count'] >= (int) config('ai.max_retries', 3), '超时任务不得自动重试');
+    check(db_count('ai_workflow_steps', "workflow_id = ? AND status = 'completed'", [$id]) === 0, '超时后不得写入已完成步骤');
+});
+
+echo "\n[Phase 3：AI 事实来源与可信度]\n";
+
+test('P3：AI 事实默认标记为 AI 推测并写入来源位置', function (): void {
+    $owner = make_family_user('p3-fact-kind');
+    $familyId = \App\Services\FamilyService::create($owner, '事实类型家族', 'p3-kind-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, [
+        'title' => '来源档案', 'privacy' => 'private',
+    ]);
+    $factId = \App\Services\AiWorkflowService::addFactCandidate(
+        $owner, $familyId, 'date', '1990年家族迁徙', 'ai_extraction',
+        null, null, 0.65, '档案摘录：1990年家族迁徙', $archiveId, null, 'family', $familyId
+    );
+    $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
+    check($fact !== null, '事实未入库');
+    check((string) $fact['fact_kind'] === 'ai_inferred', 'AI 提取必须标记为 ai_inferred');
+    check((string) $fact['review_status'] === 'pending', 'AI 事实不得自动审核通过');
+    check((string) $fact['source_location'] !== '', '应写入来源位置');
+    check((float) $fact['confidence'] < 1.0, 'AI 推测置信度不得为 1');
+
+    $rejected = false;
+    try {
+        \App\Services\AiWorkflowService::addFactCandidate(
+            $owner, $familyId, 'date', '伪造来源', 'ai_extraction',
+            999999, null, 0.5, null, 999999, null, 'family', $familyId
+        );
+    } catch (\App\Core\HttpException $e) {
+        $rejected = $e->getStatusCode() === 404;
+    }
+    check($rejected, '不属于本家族的来源档案必须被拒绝');
+});
+
+test('P3：人工审核事实写入版本、意见与修订历史', function (): void {
+    $owner = make_family_user('p3-review');
+    $familyId = \App\Services\FamilyService::create($owner, '事实审核家族', 'p3-review-' . bin2hex(random_bytes(3)));
+    $factId = \App\Services\AiWorkflowService::addFactCandidate(
+        $owner, $familyId, 'date', '1992年迁入南方', 'user_input',
+        null, null, 0.8, '用户口述', null, null, 'family', $familyId
+    );
+    \App\Services\AiWorkflowService::reviewFact($owner, $factId, 'approved', '已核对档案');
+    $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
+    check((string) $fact['verification_status'] === 'confirmed', '审核后应变为 confirmed');
+    check((string) $fact['review_status'] === 'approved', 'review_status 应为 approved');
+    check((int) $fact['version'] === 2, '版本应递增到 2');
+    check(db_count('ai_fact_revisions', 'fact_id = ?', [$factId]) === 1, '应保存一条审核前版本');
+
+    \App\Services\AiWorkflowService::reviewFact($owner, $factId, 'disputed', '发现矛盾，需修订');
+    $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
+    check((string) $fact['review_status'] === 'needs_revision', '争议应进入 needs_revision');
+    check((int) $fact['version'] === 3, '再次审核版本应递增到 3');
+    check(db_count('ai_fact_revisions', 'fact_id = ?', [$factId]) === 2, '修订历史应保留两条');
+});
+
+test('P3：事实审核完成后联动工作流审核步骤与生成日志', function (): void {
+    $owner = make_family_user('p3-sync');
+    $familyId = \App\Services\FamilyService::create($owner, '审核联动家族', 'p3-sync-' . bin2hex(random_bytes(3)));
+    $workflowId = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1995年家族聚会照片说明。',
+    ], 'p3-sync-key');
+    \App\Services\AiWorkflowService::process($workflowId, 'p3-worker');
+    $step = Db::fetch(
+        "SELECT * FROM ai_workflow_steps WHERE workflow_id = ? AND name = 'review_draft' LIMIT 1",
+        [$workflowId]
+    );
+    check($step !== null && (string) $step['status'] === 'awaiting_review', '审核步骤应处于待审核');
+    $factId = \App\Services\AiWorkflowService::addFactCandidate(
+        $owner, $familyId, 'date', '1995年家族聚会', 'ai_extraction',
+        null, null, 0.6, '候选摘录', null, null, 'family', $familyId, $workflowId
+    );
+    \App\Services\AiWorkflowService::reviewFact($owner, $factId, 'approved', '已核实');
+    $step = Db::fetch(
+        "SELECT * FROM ai_workflow_steps WHERE workflow_id = ? AND name = 'review_draft' LIMIT 1",
+        [$workflowId]
+    );
+    check((string) $step['status'] === 'approved', '无待审核事实后步骤应 approved');
+    check(
+        (string) Db::value('SELECT review_status FROM ai_generation_logs WHERE workflow_id = ? ORDER BY id DESC LIMIT 1', [$workflowId]) === 'confirmed',
+        '生成日志审核状态应同步 confirmed'
+    );
+});
+
+echo "\n[Phase 4：文件哈希与处理溯源]\n";
+
+test('P4：JPEG 原始哈希与处理后哈希分别记录且可追溯', function (): void {
+    $owner = make_family_user('p4-hash');
+    $familyId = \App\Services\FamilyService::create($owner, '哈希家族', 'p4-hash-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '哈希档案', 'privacy' => 'private']);
+
+    $tmp = sys_get_temp_dir() . '/p4-hash-' . bin2hex(random_bytes(4)) . '.jpg';
+    $image = imagecreatetruecolor(24, 24);
+    imagefill($image, 0, 0, imagecolorallocate($image, 120, 60, 30));
+    imagejpeg($image, $tmp, 75);
+    imagedestroy($image);
+    $originalHash = (string) hash_file('sha256', $tmp);
+
+    login((string) $owner['email'], 'FamilyTest@123');
+    $upload = http('POST', '/archives/' . $archiveId . '/files', [
+        '_token' => csrf_token('/archives/' . $archiveId),
+    ], ['file' => $tmp], false);
+    check($upload['status'] === 302, '上传应重定向');
+
+    $file = Db::fetch('SELECT * FROM archive_files WHERE archive_id = ? LIMIT 1', [$archiveId]);
+    check($file !== null, '缺少档案文件记录');
+    check((string) $file['original_sha256'] === $originalHash, '原始哈希必须记录上传前字节');
+    check((string) $file['processed_sha256'] === (string) $file['sha256'], '兼容 sha256 应表示处理后哈希');
+    check(!empty($file['original_storage_key']) && (int) $file['original_kept'] === 1, '应保留原始文件副本');
+    check((string) $file['processing_method'] === 'jpeg_reencode_gd', '处理方式为 GD 重编码');
+
+    $processedPath = \App\Core\Storage::absolute((string) $file['storage_key']);
+    $originalPath = \App\Core\Storage::absolute((string) $file['original_storage_key']);
+    check($processedPath !== null && $originalPath !== null, '两份物理文件都应存在');
+    check((string) hash_file('sha256', (string) $processedPath) === (string) $file['processed_sha256'], '处理后哈希与物理文件一致');
+    check((string) hash_file('sha256', (string) $originalPath) === $originalHash, '原始哈希与物理副本一致');
+    check(
+        db_count('archive_file_processing', 'archive_file_id = ?', [(int) $file['id']]) === 1,
+        '应写入处理溯源记录'
+    );
+    @unlink($tmp);
+});
+
+test('P4：伪造图片签名与多态内容被拒绝', function (): void {
+    $owner = make_family_user('p4-forged');
+    $familyId = \App\Services\FamilyService::create($owner, '伪造家族', 'p4-forged-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '伪造档案', 'privacy' => 'private']);
+    $tmp = sys_get_temp_dir() . '/p4-forged-' . bin2hex(random_bytes(4)) . '.gif';
+    file_put_contents($tmp, "GIF89a<script>alert(1)</script>");
+
+    login((string) $owner['email'], 'FamilyTest@123');
+    // 控制器无论成功失败都 PRG 重定向，实际拒绝以数据库无记录为准。
+    http('POST', '/archives/' . $archiveId . '/files', [
+        '_token' => csrf_token('/archives/' . $archiveId),
+    ], ['file' => $tmp], false);
+    check(db_count('archive_files', 'archive_id = ?', [$archiveId]) === 0, '伪造图片不应写入文件记录');
+    @unlink($tmp);
+});
+
+test('P4：归档清理同时删除原始副本与处理后文件', function (): void {
+    $owner = make_family_user('p4-clean');
+    $familyId = \App\Services\FamilyService::create($owner, '清理哈希家族', 'p4-clean-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '清理档案', 'privacy' => 'private']);
+    $tmp = sys_get_temp_dir() . '/p4-clean-' . bin2hex(random_bytes(4)) . '.jpg';
+    $image = imagecreatetruecolor(16, 16);
+    imagefill($image, 0, 0, imagecolorallocate($image, 20, 90, 160));
+    imagejpeg($image, $tmp, 70);
+    imagedestroy($image);
+
+    login((string) $owner['email'], 'FamilyTest@123');
+    $upload = http('POST', '/archives/' . $archiveId . '/files', [
+        '_token' => csrf_token('/archives/' . $archiveId),
+    ], ['file' => $tmp], false);
+    check($upload['status'] === 302, '上传应成功');
+    $file = Db::fetch('SELECT * FROM archive_files WHERE archive_id = ? LIMIT 1', [$archiveId]);
+    check($file !== null && !empty($file['original_storage_key']), '应存在原始副本');
+    $processed = (string) \App\Core\Storage::absolute((string) $file['storage_key']);
+    $original = (string) \App\Core\Storage::absolute((string) $file['original_storage_key']);
+    check(is_file($processed) && is_file($original), '清理前两份文件都应存在');
+
+    \App\Services\ArchiveService::requestDelete($owner, $archiveId);
+    \App\Services\ArchiveService::approveDelete($owner, $archiveId, true);
+    $output = [];
+    $rc = 0;
+    exec('php ' . escapeshellarg(BASE_PATH . '/bin/archive-cleanup.php') . ' --once --limit=20 2>&1', $output, $rc);
+    check($rc === 0, '清理 worker 应成功：' . implode("\n", $output));
+    check(!is_file($processed) && !is_file($original), '原始副本与处理后文件都应被清理');
+    check(db_count('archive_files', 'archive_id = ?', [$archiveId]) === 0, '文件记录应被清理');
+    @unlink($tmp);
+});
+
+echo "\n[Phase 5：口述会话资源级权限]\n";
+
+test('P5：跨家族用户不能读取他族会话列表、详情与转写片段', function (): void {
+    $owner = make_family_user('p5-oral-owner');
+    $outsider = make_family_user('p5-oral-out');
+    $familyId = \App\Services\FamilyService::create($owner, 'P5 口述家族', 'p5-oral-' . bin2hex(random_bytes(3)), ['privacy' => 'private']);
+    $sessionId = \App\Services\AiWorkflowService::createOralSession($owner, $familyId, ['title' => '私密访谈']);
+    \App\Services\AiWorkflowService::setConsent($owner, $sessionId, true);
+    $outsiderToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $outsider['email'], 'password' => 'FamilyTest@123',
+    ]));
+    check($outsiderToken !== '', '越权测试用户应能取得 token');
+
+    $list = api('GET', '/api/v1/families/' . $familyId . '/ai/sessions', null, $outsiderToken);
+    check($list['status'] === 404, '跨家族会话列表应 404');
+    $one = api('GET', '/api/v1/ai/sessions/' . $sessionId, null, $outsiderToken);
+    check($one['status'] === 404, '跨家族会话详情应 404');
+    $segments = api('GET', '/api/v1/ai/sessions/' . $sessionId . '/segments', null, $outsiderToken);
+    check($segments['status'] === 404, '跨家族转写片段应 404');
+});
+
+test('P5：public 家族下非成员不能导出会话转录，owner 可以', function (): void {
+    $owner = make_family_user('p5-export-owner');
+    $outsider = make_family_user('p5-export-out');
+    $familyId = \App\Services\FamilyService::create($owner, 'P5 公开家族', 'p5-export-' . bin2hex(random_bytes(3)), ['privacy' => 'public']);
+    $sessionId = \App\Services\AiWorkflowService::createOralSession($owner, $familyId, ['title' => '公开家族访谈']);
+    $ownerToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $owner['email'], 'password' => 'FamilyTest@123',
+    ]));
+    $outsiderToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $outsider['email'], 'password' => 'FamilyTest@123',
+    ]));
+
+    $denied = api('GET', '/api/v1/ai/sessions/' . $sessionId . '/export', null, $outsiderToken);
+    check($denied['status'] === 404, 'public 家族非成员不得导出会话转录');
+    $allowed = api('GET', '/api/v1/ai/sessions/' . $sessionId . '/export', null, $ownerToken);
+    check($allowed['status'] === 200, '家族 owner 应可导出会话转录');
+});
+
+echo "\n[Phase 6：订单与通知并发一致性]\n";
+
+test('P6：订单幂等键与通知去重列已迁移', function (): void {
+    foreach ([
+        ['ai_orders', 'idempotency_key'],
+        ['notifications', 'dedupe_key'],
+    ] as [$table, $column]) {
+        $found = (int) Db::value(
+            'SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?',
+            [$table, $column]
+        );
+        check($found === 1, '缺少列 ' . $table . '.' . $column);
+    }
+    $versions = array_column(Db::fetchAll("SELECT version FROM schema_migrations WHERE version LIKE '20261128_%'"), 'version');
+    foreach (['20261128_010', '20261128_011'] as $version) {
+        check(in_array($version, $versions, true), '缺少迁移版本 ' . $version);
+    }
+});
+
+test('P6：10 个并发请求用同一幂等键创建订单只产生一条订单', function (): void {
+    $key = 'p6-order-' . bin2hex(random_bytes(6));
+    $script = BASE_PATH . '/tests/concurrency/order-idempotency.php';
+    $processes = [];
+    for ($i = 0; $i < 10; $i++) {
+        $command = 'php ' . escapeshellarg($script) . ' ' . escapeshellarg($key) . ' 1 1';
+        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $pipes = [];
+        $handle = proc_open($command, $descriptors, $pipes);
+        check(is_resource($handle), '无法启动订单并发子进程');
+        $processes[] = [$handle, $pipes];
+    }
+    $ids = [];
+    foreach ($processes as [$handle, $pipes]) {
+        $out = trim((string) stream_get_contents($pipes[1]));
+        $err = trim((string) stream_get_contents($pipes[2]));
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $rc = proc_close($handle);
+        check($rc === 0, '订单并发子进程失败：' . $err);
+        $payload = json_decode($out, true);
+        check(is_array($payload) && isset($payload['id']), '订单并发输出无效：' . $out);
+        $ids[] = (int) $payload['id'];
+    }
+    check(count(array_unique($ids)) === 1, '并发幂等应返回同一订单 ID');
+    check(db_count('ai_orders', 'idempotency_key = ?', [$key]) === 1, '应只写入一条订单');
+});
+
+test('P6：10 个并发请求用同一去重键只产生一条站内通知', function (): void {
+    $key = 'p6-notify-' . bin2hex(random_bytes(6));
+    $script = BASE_PATH . '/tests/concurrency/notification-dedup.php';
+    $processes = [];
+    for ($i = 0; $i < 10; $i++) {
+        $command = 'php ' . escapeshellarg($script) . ' ' . escapeshellarg($key) . ' 1';
+        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $pipes = [];
+        $handle = proc_open($command, $descriptors, $pipes);
+        check(is_resource($handle), '无法启动通知并发子进程');
+        $processes[] = [$handle, $pipes];
+    }
+    $ids = [];
+    foreach ($processes as [$handle, $pipes]) {
+        $out = trim((string) stream_get_contents($pipes[1]));
+        $err = trim((string) stream_get_contents($pipes[2]));
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $rc = proc_close($handle);
+        check($rc === 0, '通知并发子进程失败：' . $err);
+        $payload = json_decode($out, true);
+        check(is_array($payload) && isset($payload['id']), '通知并发输出无效：' . $out);
+        $ids[] = (int) $payload['id'];
+    }
+    check(count(array_unique($ids)) === 1, '并发去重应返回同一通知 ID');
+    check(db_count('notifications', 'dedupe_key = ?', [hash('sha256', $key)]) === 1, '应只写入一条通知');
+});
+
+echo "\n[Phase 7：备份加密与完整性]\n";
+
+test('P7：加密备份需正确密钥核验，错误密钥与篡改均失败', function (): void {
+    $key = 'p7-backup-key-0123456789';
+    $backupOut = [];
+    $backupRc = 0;
+    $command = 'BACKUP_ENCRYPTION_KEY=' . escapeshellarg($key)
+        . ' php ' . escapeshellarg(BASE_PATH . '/bin/backup.php') . ' --keep=3 2>&1';
+    exec($command, $backupOut, $backupRc);
+    check($backupRc === 0, '加密备份失败：' . implode("\n", $backupOut));
+    $dir = null;
+    foreach ($backupOut as $line) {
+        if (preg_match('/备份完成：(\S+)/', $line, $m) === 1) {
+            $dir = $m[1];
+        }
+    }
+    check($dir !== null && is_dir($dir), '未找到备份输出目录');
+    $manifestPath = $dir . '/manifest.json';
+    check(is_file($manifestPath), '缺少 manifest');
+    $manifest = json_decode((string) file_get_contents($manifestPath), true);
+    check(is_array($manifest), 'manifest 解析失败');
+    check(($manifest['encryption'] ?? null) === 'aes-256-cbc', 'manifest 未记录加密方式');
+    check(($manifest['key_fingerprint'] ?? null) === substr(hash('sha256', $key), 0, 16), '密钥指纹不符');
+    check(!is_file($dir . '/database.sql.gz') && is_file($dir . '/database.sql.gz.enc'), '明文未删除或密文不存在');
+    check(!array_key_exists('BACKUP_ENCRYPTION_KEY', $manifest), '密钥不得写入 manifest');
+
+    $checkScript = BASE_PATH . '/bin/restore-check.php';
+    $rightOut = [];
+    $rightRc = 0;
+    exec('BACKUP_ENCRYPTION_KEY=' . escapeshellarg($key) . ' php ' . escapeshellarg($checkScript) . ' ' . escapeshellarg($dir) . ' 2>&1', $rightOut, $rightRc);
+    check($rightRc === 0, '正确密钥核验失败：' . implode("\n", $rightOut));
+
+    $wrongOut = [];
+    $wrongRc = 0;
+    exec('BACKUP_ENCRYPTION_KEY=wrong-key-0123456789 php ' . escapeshellarg($checkScript) . ' ' . escapeshellarg($dir) . ' 2>&1', $wrongOut, $wrongRc);
+    check($wrongRc === 1, '错误密钥应核验失败');
+
+    $encPath = $dir . '/database.sql.gz.enc';
+    $original = (string) file_get_contents($encPath);
+    $tampered = $original;
+    $tampered[0] = chr((ord($tampered[0]) + 1) % 256);
+    file_put_contents($encPath, $tampered);
+    $tamperOut = [];
+    $tamperRc = 0;
+    exec('BACKUP_ENCRYPTION_KEY=' . escapeshellarg($key) . ' php ' . escapeshellarg($checkScript) . ' ' . escapeshellarg($dir) . ' 2>&1', $tamperOut, $tamperRc);
+    check($tamperRc === 1, '密文篡改应核验失败');
+    file_put_contents($encPath, $original);
+
+    foreach (glob($dir . '/*') ?: [] as $file) {
+        @unlink($file);
+    }
+    @rmdir($dir);
+});
+
+echo "\n[Phase 10：CI 时区一致性]\n";
+
+test('数据库连接时区与 PHP 应用时区一致', function (): void {
+    $offset = date('P');
+    $diff = (int) Db::value('SELECT TIMESTAMPDIFF(HOUR, NOW(), ?)', [date('Y-m-d H:i:s')]);
+    check(abs($diff) <= 1, "NOW() 与 PHP date() 相差 {$diff} 小时（PHP offset {$offset}）");
 });
 
 echo "\n========== 结果 ==========\n";

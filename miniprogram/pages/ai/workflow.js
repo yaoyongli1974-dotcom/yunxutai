@@ -13,8 +13,13 @@ const STATUS_LABELS = {
 };
 const STEP_STATUS_LABELS = {
   queued: '排队中', processing: '处理中', completed: '已完成', failed: '失败', skipped: '已跳过',
+  cancelled: '已取消', awaiting_review: '待人工审核', approved: '审核通过', rejected: '审核驳回',
 };
 const TYPE_LABELS = { extract_facts: '事实提取', transcribe_audio: '口述转写' };
+const FACT_KIND_LABELS = {
+  user_provided: '用户提供', family_verified: '家族确认', archive_verified: '档案核实',
+  public_source: '公开资料', ai_inferred: 'AI 推测（待核实）', unknown: '来源未知',
+};
 const CONSENT_LABELS = { none: '待授权', granted: '已授权', revoked: '已撤回' };
 const PROCESSING_LABELS = {
   draft: '草稿', queued: '排队中', processing: '处理中', completed: '已完成', failed: '失败',
@@ -163,7 +168,7 @@ Page({
           id: row.id,
           label: '第 ' + text(row.step_no) + ' 步 · ' + (text(row.name) || '未命名步骤'),
           statusLabel: STEP_STATUS_LABELS[row.status] || text(row.status) || '未知',
-          outputLabel: row.output_ref ? '有候选结果（待人工确认）' : '暂无输出',
+          outputLabel: row.output_ref ? 'AI 候选结果（' + (FACT_KIND_LABELS.ai_inferred) + '，待人工确认）' : '暂无输出',
           error: text(row.error_message),
         };
       });

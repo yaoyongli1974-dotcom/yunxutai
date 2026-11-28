@@ -6,7 +6,6 @@ namespace App\Controllers\Admin;
 use App\Core\Audit;
 use App\Core\Auth;
 use App\Core\Csrf;
-use App\Core\Db;
 use App\Core\Flash;
 use App\Core\HttpException;
 use App\Core\Request;
@@ -15,6 +14,9 @@ use App\Core\View;
 use App\Models\Article;
 use App\Models\Media;
 use App\Models\Message;
+use App\Services\Moderation\BatchProcessor;
+use App\Services\Moderation\IdsParser;
+use App\Services\Moderation\ModerationQueries;
 
 final class ModerationController
 {
@@ -144,30 +146,9 @@ final class ModerationController
             return $this->renderIndex(['form' => '请先勾选要处理的留言'], ['batch' => 'messages'], 422);
         }
 
-        $done = 0;
-        $skipped = 0;
-        // 批量预加载：一次查询替代逐行 find
-        $rows = $ids === [] ? [] : \App\Core\Db::fetchAll(
-            'SELECT * FROM messages WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')', $ids
-        );
-        $byId = [];
-        foreach ($rows as $row) { $byId[(int) $row['id']] = $row; }
-foreach ($ids as $id) {
-            $message = $byId[(int) $id] ?? null;
-            if ($message === null || (string) $message['status'] !== 'pending') {
-                $skipped++;
-                continue;
-            }
-            Message::setStatus($id, $status, (int) $admin['id']);
-            Audit::log('admin.message.status', 'message', $id, [
-                'status' => $status,
-                'memorial_id' => (int) $message['memorial_id'],
-                'batch' => true,
-            ]);
-            $done++;
-        }
+        $result = BatchProcessor::processMessages($ids, $status, (int) $admin['id']);
 
-        Flash::success(sprintf('批量处理完成：留言已%s %d 条，跳过 %d 条（不存在或已处理）。', $status === 'visible' ? '通过展示' : '隐藏', $done, $skipped));
+        Flash::success(sprintf('批量处理完成：留言已%s %d 条，跳过 %d 条（不存在或已处理）。', $status === 'visible' ? '通过展示' : '隐藏', $result['done'], $result['skipped']));
         return Response::redirect('/admin/moderation');
     }
 
@@ -192,39 +173,10 @@ foreach ($ids as $id) {
             return $this->renderIndex(['form' => '请先勾选要处理的文章'], ['batch' => 'articles'], 422);
         }
 
-        $done = 0;
-        $skipped = 0;
-        // 批量预加载：一次查询替代逐行 find
-        $rows = $ids === [] ? [] : \App\Core\Db::fetchAll(
-            'SELECT * FROM articles WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')', $ids
-        );
-        $byId = [];
-        foreach ($rows as $row) { $byId[(int) $row['id']] = $row; }
-foreach ($ids as $id) {
-            $article = $byId[(int) $id] ?? null;
-            if ($article === null || (string) $article['status'] !== 'pending') {
-                $skipped++;
-                continue;
-            }
-            if ($action === 'approve') {
-                Article::setStatus($id, 'published');
-                Audit::log('admin.article.approve', 'article', $id, [
-                    'memorial_id' => (int) $article['memorial_id'],
-                    'batch' => true,
-                ]);
-            } else {
-                Article::setStatus($id, 'rejected', $note !== '' ? $note : null);
-                Audit::log('admin.article.reject', 'article', $id, [
-                    'memorial_id' => (int) $article['memorial_id'],
-                    'review_note' => $note,
-                    'batch' => true,
-                ]);
-            }
-            $done++;
-        }
+        $result = BatchProcessor::processArticles($ids, $action, $note);
 
         $verb = $action === 'approve' ? '通过发布' : '驳回';
-        Flash::success(sprintf('批量处理完成：文章已%s %d 篇，跳过 %d 篇（不存在或已处理）。', $verb, $done, $skipped));
+        Flash::success(sprintf('批量处理完成：文章已%s %d 篇，跳过 %d 篇（不存在或已处理）。', $verb, $result['done'], $result['skipped']));
         return Response::redirect('/admin/moderation');
     }
 
@@ -244,84 +196,23 @@ foreach ($ids as $id) {
             return $this->renderIndex(['form' => '请先勾选要处理的媒体'], ['batch' => 'media'], 422);
         }
 
-        $done = 0;
-        $skipped = 0;
-        // 批量预加载：一次查询替代逐行 find
-        $rows = $ids === [] ? [] : \App\Core\Db::fetchAll(
-            'SELECT * FROM media WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')', $ids
-        );
-        $byId = [];
-        foreach ($rows as $row) { $byId[(int) $row['id']] = $row; }
-foreach ($ids as $id) {
-            $media = $byId[(int) $id] ?? null;
-            if ($media === null) {
-                $skipped++;
-                continue;
-            }
-            if ($action === 'show' && (string) $media['status'] !== 'hidden') {
-                $skipped++;
-                continue;
-            }
-            if ($action === 'hide') {
-                Media::hide($id);
-                Audit::log('admin.media.hide', 'media', $id, [
-                    'memorial_id' => (int) $media['memorial_id'],
-                    'batch' => true,
-                ]);
-            } else {
-                Media::show($id);
-                Audit::log('admin.media.show', 'media', $id, [
-                    'memorial_id' => (int) $media['memorial_id'],
-                    'batch' => true,
-                ]);
-            }
-            $done++;
-        }
+        $result = BatchProcessor::processMedia($ids, $action);
 
         $verb = $action === 'hide' ? '已隐藏' : '已恢复展示';
-        Flash::success(sprintf('批量处理完成：媒体%s %d 个，跳过 %d 个（不存在或状态不符）。', $verb, $done, $skipped));
+        Flash::success(sprintf('批量处理完成：媒体%s %d 个，跳过 %d 个（不存在或状态不符）。', $verb, $result['done'], $result['skipped']));
         return Response::redirect('/admin/moderation');
     }
 
-    /** 解析并去重的勾选 id 列表；上限 100 条，空返回 null。 */
+    /** 解析勾选 id；保留原有的 list 归一化，具体解析规则见 IdsParser。 */
     private function parseIds(Request $request): ?array
     {
-        $raw = $request->raw('ids', []);
-        if (!is_array($raw)) {
-            return null;
-        }
-        $ids = [];
-        foreach ($raw as $v) {
-            if (is_numeric($v)) {
-                $ids[(int) $v] = true;
-            }
-        }
-        $ids = array_keys($ids);
-        if ($ids === [] || count($ids) > 100) {
-            return null;
-        }
-        return array_values($ids);
+        $ids = IdsParser::parse($request);
+        return $ids === null ? null : array_values($ids);
     }
 
     private function renderIndex(array $errors = [], array $old = [], int $status = 200): Response
     {
-        $hiddenMedia = Db::fetchAll(
-            "SELECT md.*, m.slug, d.full_name
-             FROM media md
-             JOIN memorials m ON m.id = md.memorial_id
-             JOIN deceased d ON d.id = m.deceased_id
-             WHERE md.status = 'hidden'
-             ORDER BY md.created_at DESC, md.id DESC LIMIT 50"
-        );
-
-        $recentMedia = Db::fetchAll(
-            "SELECT md.*, m.slug, d.full_name
-             FROM media md
-             JOIN memorials m ON m.id = md.memorial_id
-             JOIN deceased d ON d.id = m.deceased_id
-             WHERE md.status = 'active'
-             ORDER BY md.created_at DESC, md.id DESC LIMIT 20"
-        );
+        $media = ModerationQueries::dashboardData();
 
         return View::render('admin/moderation', [
             'title' => '内容审核',
@@ -329,8 +220,8 @@ foreach ($ids as $id) {
             'active' => 'moderation',
             'pendingMessages' => Message::pendingAll(50),
             'pendingArticles' => Article::pending(50, 0),
-            'hiddenMedia' => $hiddenMedia,
-            'recentMedia' => $recentMedia,
+            'hiddenMedia' => $media['hiddenMedia'],
+            'recentMedia' => $media['recentMedia'],
             'errors' => $errors,
             'old' => $old,
         ], 'layout', $status);

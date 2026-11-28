@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Core\Db;
+use PDOException;
 
 /**
  * AI 付费订单（订单审核制）：充值开关开启时，AI 任务先建订单，
@@ -11,17 +12,42 @@ use App\Core\Db;
  */
 final class AiOrder
 {
-    public static function create(int $memorialId, int $userId, array $service, array $input): int
+    /**
+     * 创建订单。相同纪念馆/用户/服务/内容重复提交时复用既有订单，
+     * 避免重复下单导致重复扣费与重复生成任务。
+     *
+     * @param array<string,mixed> $service
+     * @param array<string,mixed> $input
+     */
+    public static function create(int $memorialId, int $userId, array $service, array $input, ?string $idempotencyKey = null): int
     {
-        return Db::insert('ai_orders', [
-            'memorial_id' => $memorialId,
-            'user_id' => $userId,
-            'service_slug' => (string) $service['slug'],
-            'service_name' => (string) $service['name'],
-            'price_cents' => (int) $service['price_cents'],
-            'input_json' => json_encode($input, JSON_UNESCAPED_UNICODE),
-            'status' => 'pending',
-        ]);
+        $inputJson = json_encode($input, JSON_UNESCAPED_UNICODE);
+        $serviceSlug = (string) $service['slug'];
+        if ($idempotencyKey === null) {
+            $idempotencyKey = hash('sha256', $memorialId . '|' . $userId . '|' . $serviceSlug . '|' . (string) $inputJson);
+        }
+
+        try {
+            return Db::insert('ai_orders', [
+                'memorial_id' => $memorialId,
+                'user_id' => $userId,
+                'service_slug' => $serviceSlug,
+                'service_name' => (string) $service['name'],
+                'price_cents' => (int) $service['price_cents'],
+                'input_json' => $inputJson,
+                'status' => 'pending',
+                'idempotency_key' => $idempotencyKey,
+            ]);
+        } catch (PDOException $e) {
+            // 唯一键冲突（SQLSTATE 23000 / MySQL 1062）：重复提交，返回既有订单 ID。
+            if ($e->getCode() === '23000' || ($e->errorInfo[1] ?? null) === 1062) {
+                $existing = Db::fetch('SELECT id FROM ai_orders WHERE idempotency_key = ? LIMIT 1', [$idempotencyKey]);
+                if ($existing !== null) {
+                    return (int) $existing['id'];
+                }
+            }
+            throw $e;
+        }
     }
 
     public static function find(int $id): ?array

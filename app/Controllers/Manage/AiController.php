@@ -98,6 +98,8 @@ final class AiController
         }
 
         // 充电模式（订单审核制）：不直接生成任务，先创建待确认订单。
+        // 不额外传幂等键：AiOrder::create 会按纪念馆/用户/服务/内容计算确定性 key，
+        // 相同请求重复提交复用同一订单，避免重复扣费。
         if ((bool) config('ai.charging', false)) {
             $orderId = AiOrder::create(
                 (int) $memorial['id'],

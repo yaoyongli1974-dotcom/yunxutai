@@ -24,7 +24,8 @@ if (PHP_SAPI !== 'cli') {
 
 $options = getopt('', ['limit::', 'max-runtime::', 'once::']);
 $limit = max(1, min(50, (int) ($options['limit'] ?? 5)));
-$maxRuntime = max(1, (int) ($options['max-runtime'] ?? 300));
+$maxRuntime = max(1, (int) ($options['max-runtime'] ?? config('ai.workflow_timeout_seconds', 1800)));
+$heartbeatSeconds = max(5, intdiv(max(60, (int) config('ai.worker_lease_seconds', 900)), 3));
 $once = array_key_exists('once', $options);
 $workerId = 'w2-' . bin2hex(random_bytes(8));
 $deadline = time() + $maxRuntime;
@@ -51,17 +52,17 @@ if (function_exists('pcntl_async_signals')) {
         $stop = true;
         $log('signal', ['signal' => 'SIGINT']);
     });
-    pcntl_signal(SIGALRM, static function () use (&$current, $workerId, $log): void {
+    pcntl_signal(SIGALRM, static function () use (&$current, $workerId, $log, $heartbeatSeconds): void {
         if ($current !== null && !AiWorkflowService::heartbeat($current['id'], $workerId, $current['lock_version'])) {
             $log('heartbeat_failed', ['workflow_id' => $current['id']]);
         } else {
             $log('heartbeat', ['workflow_id' => $current['id'] ?? 0]);
         }
-        pcntl_alarm(60);
+        pcntl_alarm($heartbeatSeconds);
     });
 }
 
-$log('started', ['limit' => $limit, 'max_runtime' => $maxRuntime, 'once' => $once]);
+$log('started', ['limit' => $limit, 'max_runtime' => $maxRuntime, 'heartbeat' => $heartbeatSeconds, 'once' => $once]);
 
 while (!$stop && time() < $deadline) {
     try {
@@ -98,7 +99,7 @@ while (!$stop && time() < $deadline) {
         $stats['claimed']++;
         $log('claimed', ['workflow_id' => $current['id'], 'lock_version' => $current['lock_version']]);
         if (function_exists('pcntl_alarm')) {
-            pcntl_alarm(60);
+            pcntl_alarm($heartbeatSeconds);
         }
         try {
             AiWorkflowService::process($current['id'], $workerId, $current['lock_version']);

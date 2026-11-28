@@ -6,7 +6,9 @@ declare(strict_types=1);
  * 备份数据库与上传目录。
  * 用法：php bin/backup.php [--keep=14] [--no-uploads]
  * 产物：storage/backups/YYYYmmdd-HHMMSS/{database.sql.gz,uploads.tar.gz,verifications.tar.gz,manifest.json}
- * manifest.json 的 files 段记录各产物 sha256 与 bytes，可用 bin/restore-check.php 核验。
+ * 配置 BACKUP_ENCRYPTION_KEY 后产物落盘为 *.enc（AES-256-CBC），明文随即删除；
+ * manifest.json 的 files 段记录明文与密文 sha256/bytes，可用 bin/restore-check.php 核验。
+ * 异地存储策略见 docs/deployment.md，本脚本不自动上传。
  */
 
 define('BASE_PATH', dirname(__DIR__));
@@ -33,6 +35,16 @@ if (!is_dir($target) && !mkdir($target, 0750, true) && !is_dir($target)) {
 }
 
 echo "备份开始：{$target}\n";
+
+/** MySQL 8+ 的 mysqldump 在 MariaDB 服务器上会查询 COLUMN_STATISTICS，需要关闭该选项；MariaDB/旧版客户端不支持该参数。 */
+function mysqldumpNeedsNoColumnStatistics(): bool
+{
+    $version = shell_exec('mysqldump --version 2>/dev/null');
+    if (!is_string($version) || stripos($version, 'mariadb') !== false) {
+        return false;
+    }
+    return preg_match('/\b(?:8|9)\.\d+\.\d+/', $version) === 1;
+}
 
 function run(array $command, array $env, ?string $stdoutFile = null): int
 {
@@ -63,6 +75,11 @@ try {
 
     $command = [
         'mysqldump',
+    ];
+    if (mysqldumpNeedsNoColumnStatistics()) {
+        $command[] = '--column-statistics=0';
+    }
+    $command = array_merge($command, [
         '--single-transaction',
         '--quick',
         '--skip-lock-tables',
@@ -71,7 +88,7 @@ try {
         '--port=' . config('db.port'),
         '--user=' . config('db.username'),
         (string) config('db.database'),
-    ];
+    ]);
     run($command, $env, $dumpPath);
     echo "  数据库已导出：" . filesize($dumpPath) . " 字节\n";
 
@@ -95,16 +112,39 @@ try {
         }
     }
 
-    // 所有产物落盘后再计算校验和并写入 manifest
+    // 所有产物落盘后再计算校验和并写入 manifest。
+    // 配置 BACKUP_ENCRYPTION_KEY 时对产物做 AES-256-CBC 加密；密钥不写入 manifest，仅存指纹用于校验。
+    $encryptionKey = (string) (getenv('BACKUP_ENCRYPTION_KEY') ?: '');
+    if ($encryptionKey !== '' && strlen($encryptionKey) < 16) {
+        throw new RuntimeException('BACKUP_ENCRYPTION_KEY 至少需要 16 个字符');
+    }
+    $encKey = $encryptionKey !== '' ? hash('sha256', $encryptionKey, true) : null;
     $files = [];
     foreach (['database.sql.gz', 'uploads.tar.gz', 'verifications.tar.gz'] as $artifact) {
         $path = $target . '/' . $artifact;
-        if (is_file($path)) {
-            $files[$artifact] = [
-                'sha256' => hash_file('sha256', $path),
-                'bytes' => (int) filesize($path),
-            ];
+        if (!is_file($path)) {
+            continue;
         }
+        $plaintext = (string) file_get_contents($path);
+        $meta = [
+            'sha256' => hash('sha256', $plaintext),
+            'bytes' => strlen($plaintext),
+        ];
+        if ($encKey !== null) {
+            $iv = random_bytes(16);
+            $ciphertext = openssl_encrypt($plaintext, 'aes-256-cbc', $encKey, OPENSSL_RAW_DATA, $iv);
+            if ($ciphertext === false) {
+                throw new RuntimeException('备份加密失败：' . $artifact);
+            }
+            file_put_contents($path . '.enc', $ciphertext);
+            @chmod($path . '.enc', 0600);
+            @unlink($path);
+            $meta['encrypted'] = true;
+            $meta['iv'] = base64_encode($iv);
+            $meta['enc_sha256'] = hash('sha256', $ciphertext);
+            $meta['enc_bytes'] = strlen($ciphertext);
+        }
+        $files[$artifact] = $meta;
     }
 
     file_put_contents($target . '/manifest.json', json_encode([
@@ -112,6 +152,8 @@ try {
         'database' => config('db.database'),
         'php' => PHP_VERSION,
         'uploads' => $includeUploads,
+        'encryption' => $encKey !== null ? 'aes-256-cbc' : null,
+        'key_fingerprint' => $encKey !== null ? substr(hash('sha256', $encryptionKey), 0, 16) : null,
         'files' => $files,
     ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
 

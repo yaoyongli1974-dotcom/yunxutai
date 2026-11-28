@@ -21,6 +21,16 @@ if ($appEnv === 'production' && $appDebug) {
     throw new RuntimeException('生产环境禁止开启 APP_DEBUG（调试模式）；请将 APP_DEBUG 设为 false 后再启动。');
 }
 
+/** 整数配置：缺省/非法值回退默认值，并强制上下限，避免无限执行或负数。 */
+$aiInt = static function (string $name, int $default, int $min, int $max): int {
+    $value = filter_var(getenv($name), FILTER_VALIDATE_INT);
+    if ($value === false) {
+        return $default;
+    }
+    return max($min, min($max, (int) $value));
+};
+$providerTimeout = $aiInt('AI_PROVIDER_TIMEOUT_SECONDS', (int) (getenv('AI_TIMEOUT') ?: 120), 5, 600);
+
 return [
     'app' => [
         'name'        => getenv('APP_NAME') ?: '云叙台',
@@ -97,7 +107,13 @@ return [
         'image_model' => getenv('AI_IMAGE_MODEL') ?: 'gpt-image-1',
         // 预留：AI 直出视频模型（当前纪念短片由 ffmpeg 本地合成）
         'video_model' => (string) (getenv('AI_VIDEO_MODEL') ?: ''),
-        'timeout' => (int) (getenv('AI_TIMEOUT') ?: 120),
+        'timeout' => $providerTimeout,
+        'provider_timeout_seconds' => $providerTimeout,
+        'workflow_timeout_seconds' => $aiInt('AI_WORKFLOW_TIMEOUT_SECONDS', 1800, 60, 86400),
+        'step_timeout_seconds' => $aiInt('AI_WORKFLOW_STEP_TIMEOUT_SECONDS', 300, 5, 3600),
+        'worker_lease_seconds' => $aiInt('AI_WORKER_LEASE_SECONDS', 900, 60, 7200),
+        'max_retries' => $aiInt('AI_WORKFLOW_MAX_RETRIES', 3, 0, 10),
+        'retry_backoff_seconds' => $aiInt('AI_WORKFLOW_RETRY_BACKOFF_SECONDS', 60, 1, 3600),
         'daily_limit' => (int) (getenv('AI_DAILY_LIMIT') ?: 10),
         'sync' => filter_var(getenv('AI_SYNC') ?: 'true', FILTER_VALIDATE_BOOL),
         'charging' => filter_var(getenv('AI_CHARGING') ?: 'false', FILTER_VALIDATE_BOOL),
