@@ -34,14 +34,14 @@
 - 本地：145 集成测试通过 / 0 失败；PHP lint、PHPStan Level 5、composer validate、secret-scan、node --check、migration 32 版本 + 重复 + checksum、doctor、git diff --check 均 rc=0。
 - 恢复演练：备份校验 3 产物 sha256/bytes OK，隔离库导入 + doctor + 行数核对通过，演练库已删除。
 - 并发：10 Worker 领取同一任务只有一个有效执行者（真实子进程并发）。
-- 远程四矩阵 CI：Run URL / PR 号在 PR 创建后回填；未取得结果前不声称远程全绿。
+- 远程四矩阵 CI：最终 run `46120192213`（SHA `87105eb`）completed/success，4/4 job success，全部 step success，check run 注解 0；PR #1 四项 checks 全部 pass。
 
 ## 6. Commit / PR / CI
 
-- 分支最终代码提交：`git rev-parse HEAD`（本报告随 Phase E 文档提交后由 PR 指向该 HEAD）。
-- PR：`待创建（用户已授权 push 功能分支并开 PR，不合并 main）`。
-- CI Run：`待回填`。
-- Required checks：main 分支无保护规则；CI 是本仓库唯一 workflow。
+- 分支最终代码提交：`87105eb825231628bbd1c19359c089aad10af912`（v2.1.0 发布候选）。
+- PR：#1 https://github.com/yaoyongli1974-dotcom/yunxutai/pull/1（OPEN，未合并 main）。
+- CI Run：https://github.com/yaoyongli1974-dotcom/yunxutai/actions/runs/46120192213（completed/success，4/4 job success，全部 step success，check run 注解 0）。
+- Required checks：main 分支无保护规则；CI 是本仓库唯一 workflow，四项 matrix checks 全部 pass。
 
 ## 7. 剩余问题与建议
 

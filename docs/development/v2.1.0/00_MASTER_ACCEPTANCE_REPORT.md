@@ -31,7 +31,7 @@
 
 13. **哪些数据结构发生变化**：追加列/表/索引：`invitations.token_hash`、`memory_facts` 来源/主体 5 列、新表 `archive_cleanup_queue`、`audit_logs.request_id`、索引 `idx_person_family_deleted_id` 与 `idx_rel_family_id`；`schema.sql` 补齐 027 的 `lock_version/heartbeat_at/last_error_at` 以提高全新安装一致性。无删除列、无改字段语义。
 
-14. **四矩阵 CI 是否全部通过**：本地已按 CI 顺序全量复验（PHP 8.4 本地 + MariaDB 11.8.9，145/0，所有门禁 rc=0）；远程四矩阵（8.4/8.5 × MySQL 8.4/MariaDB 11）以用户授权创建的功能分支 PR checks 为准，**尚未取得结果前不宣称全绿**。详见 `91_RELEASE_READINESS.md` §6。
+14. **四矩阵 CI 是否全部通过**：本地已按 CI 顺序全量复验（PHP 8.4 本地 + MariaDB 11.8.9，145/0，所有门禁 rc=0）；远程四矩阵（8.4/8.5 × MySQL 8.4/MariaDB 11）最终 run `46120192213`（SHA `87105eb`）completed/success，4/4 job success，全部 step success，check run 注解 0，PR #1 四项 checks 全部 pass。详见 `91_RELEASE_READINESS_REPORT.md` §6。
 
 15. **备份恢复是否完成真实演练**：完成**非生产环境**完整链路：备份生成 → 3 产物 sha256/bytes 校验（tables=56、inserts=19）→ 隔离库导入 → doctor rc=0 → 关键表行数核对 → 演练库删除。日志与目录见 `90_FINAL_TEST_REPORT.md` §5；生产库未触碰。
 
