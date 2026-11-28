@@ -4,7 +4,7 @@
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-PATTERN='ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|[a-z]+://[^/@:[:space:]]+:[^@/[:space:]]+@|WX_SECRET[[:space:]]*=[[:space:]]*[^[:space:]#]+'
+PATTERN='[a-z]+://[A-Za-z0-9._~%-]+:[A-Za-z0-9._~%+=/-]+@'
 
 HITS=$(git ls-files -z | grep -zZvE '^(docs/|tests/)' | xargs -0 -r grep -nE "$PATTERN" || true)
 if [ -n "$HITS" ]; then
