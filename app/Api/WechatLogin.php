@@ -5,6 +5,7 @@ namespace App\Api;
 
 use App\Core\ApiAuth;
 use App\Core\Db;
+use Throwable;
 
 /**
  * 微信小程序登录（jscode2session 换 openid）。

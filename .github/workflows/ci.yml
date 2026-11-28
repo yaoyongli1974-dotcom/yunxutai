@@ -73,6 +73,14 @@ jobs:
           exit(1);
           '
 
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Secret scan (local patterns)
+        run: bash bin/secret-scan.sh
+
       - name: PHP syntax check
         run: find app bin database tests config public -name '*.php' -print0 | xargs -0 -n1 php -l
 

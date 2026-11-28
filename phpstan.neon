@@ -10,5 +10,4 @@ parameters:
     excludePaths:
         - app/Views/*
     scanDirectories: []
-    ignoreErrors:
-        - '#Undefined variable \$_#'
+    ignoreErrors: []

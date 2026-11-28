@@ -1,4 +1,175 @@
-# PHPStan baseline：冻结存量问题，只卡增量。
-# 首次安装依赖后可用 `vendor/bin/phpstan analyse --generate-baseline=phpstan-baseline.neon` 重新生成。
 parameters:
-    ignoreErrors: []
+	ignoreErrors:
+		-
+			message: '#^Array has 2 duplicate keys with value ''video_model'' \(''video_model'', ''video_model''\)\.$#'
+			identifier: array.duplicateKey
+			count: 1
+			path: app/Controllers/Admin/AiServiceController.php
+
+		-
+			message: '#^Parameter \#1 \$array \(non\-empty\-list\<int\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: app/Controllers/Admin/ModerationController.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$user$#'
+			identifier: parameter.notFound
+			count: 1
+			path: app/Controllers/FamilyController.php
+
+		-
+			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: app/Core/ApiAuth.php
+
+		-
+			message: '#^Offset ''samesite'' on array\{lifetime\: int\<0, max\>, path\: non\-falsy\-string, domain\: string, secure\: bool, httponly\: bool, samesite\: ''Lax''\|''lax''\|''None''\|''none''\|''Strict''\|''strict''\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Core/Auth.php
+
+		-
+			message: '#^Method App\\Core\\Kv\\RedisSessionHandler\:\:gc\(\) never returns false so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: app/Core/Kv/RedisSessionHandler.php
+
+		-
+			message: '#^Result of && is always false\.$#'
+			identifier: booleanAnd.alwaysFalse
+			count: 1
+			path: app/Core/Notify.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between '''' and '''' will always evaluate to false\.$#'
+			identifier: notIdentical.alwaysFalse
+			count: 1
+			path: app/Core/Notify.php
+
+		-
+			message: '#^Variable \$username on left side of \?\? is never defined\.$#'
+			identifier: nullCoalesce.variable
+			count: 1
+			path: app/Core/Notify.php
+
+		-
+			message: '#^PHPDoc tag @var for constant App\\Core\\Settings\:\:AI_DOMAIN_FIELDS with type array\<string, string\> is incompatible with value array\{''enabled'', ''provider'', ''base_url'', ''api_key'', ''model''\}\.$#'
+			identifier: classConstant.phpDocType
+			count: 1
+			path: app/Core/Settings.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between string and null will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 2
+			path: app/Core/Settings.php
+
+		-
+			message: '#^Constant BASE_PATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/Core/View.php
+
+		-
+			message: '#^Variable \$http_response_header on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.variable
+			count: 1
+			path: app/Services/Ai/OpenAiClient.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: app/Services/AiWorkflowService.php
+
+		-
+			message: '#^Offset ''model'' on array\{provider\: string, base_url\: string, api_key\: string, model\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: app/Services/AiWorkflowService.php
+
+		-
+			message: '#^Caught class App\\Services\\Throwable not found\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Services/ArchiveService.php
+
+		-
+			message: '#^Throwing object of an unknown class App\\Services\\Throwable\.$#'
+			identifier: class.notFound
+			count: 1
+			path: app/Services/ArchiveService.php
+
+		-
+			message: '#^Result of && is always false\.$#'
+			identifier: booleanAnd.alwaysFalse
+			count: 1
+			path: app/Services/FamilyPersonService.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between string and null will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: app/Services/FamilyPersonService.php
+
+		-
+			message: '#^Constant BASE_PATH not found\.$#'
+			identifier: constant.notFound
+			count: 6
+			path: app/bootstrap.php
+
+		-
+			message: '#^Constant BASE_PATH not found\.$#'
+			identifier: constant.notFound
+			count: 1
+			path: app/helpers.php
+
+		-
+			message: '#^Left side of \|\| is always false\.$#'
+			identifier: booleanOr.leftAlwaysFalse
+			count: 1
+			path: bin/ai-workflow-worker.php
+
+		-
+			message: '#^Offset ''id'' on null on left side of \?\? does not exist\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: bin/ai-workflow-worker.php
+
+		-
+			message: '#^Result of && is always false\.$#'
+			identifier: booleanAnd.alwaysFalse
+			count: 1
+			path: bin/ai-workflow-worker.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between null and null will always evaluate to false\.$#'
+			identifier: notIdentical.alwaysFalse
+			count: 1
+			path: bin/ai-workflow-worker.php
+
+		-
+			message: '#^Empty array passed to foreach\.$#'
+			identifier: foreach.emptyArray
+			count: 1
+			path: bin/doctor.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between array\{\} and array\{\} will always evaluate to false\.$#'
+			identifier: notIdentical.alwaysFalse
+			count: 2
+			path: bin/doctor.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between non\-falsy\-string and '''' will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: bin/install.php
+
+		-
+			message: '#^Constant BASE_PATH not found\.$#'
+			identifier: constant.notFound
+			count: 4
+			path: config/config.php
