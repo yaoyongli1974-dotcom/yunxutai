@@ -6,6 +6,7 @@ namespace App\Api\Controllers;
 use App\Api\Api;
 use App\Api\ApiException;
 use App\Api\Input;
+use App\Core\Auth;
 use App\Core\HttpException;
 use App\Core\Policy;
 use App\Core\Request;
@@ -50,6 +51,36 @@ final class FamilyV2Controller extends BaseController
             throw ApiException::validation('编号无效');
         }
         return $id;
+    }
+
+    /**
+     * 口述会话读取必须限制在该家族有效成员（或平台管理员）。
+     * public 家族不自动授予会话/转写读取权限，避免知道 family_id 即可越权。
+     */
+    private function assertOralMember(?array $user, int $familyId): void
+    {
+        if (Policy::familyRole($familyId, (int) ($user['id'] ?? 0)) === null && !Auth::isAdmin()) {
+            throw ApiException::notFound('会话不存在');
+        }
+    }
+
+    /** 会话转录导出属于数据导出能力，仅限家族 owner/admin。 */
+    private function assertOralExport(?array $user, int $familyId): void
+    {
+        if (!Policy::can('data.export', ['family_id' => $familyId, 'resource' => null], $user)) {
+            throw ApiException::notFound('会话不存在');
+        }
+    }
+
+    /** 按会话 ID 读取并复核家族成员权限，统一 404 不泄漏存在性。 */
+    private function oralSessionForMember(?array $user, int $sessionId): array
+    {
+        $session = AiWorkflowService::session($sessionId);
+        if ($session === null) {
+            throw ApiException::notFound('会话不存在');
+        }
+        $this->assertOralMember($user, (int) $session['family_id']);
+        return $session;
     }
 
     // ---- 家族 ----
@@ -321,7 +352,10 @@ final class FamilyV2Controller extends BaseController
 
     public function oralSessions(Request $request, string $id): Response
     {
-        return Api::ok(['items' => $this->call(fn () => AiWorkflowService::sessions($this->id($id)))]);
+        $user = $this->user();
+        $familyId = $this->id($id);
+        $this->assertOralMember($user, $familyId);
+        return Api::ok(['items' => $this->call(fn () => AiWorkflowService::sessions($familyId))]);
     }
 
     // ---- 时间轴与展馆 ----
@@ -406,10 +440,7 @@ final class FamilyV2Controller extends BaseController
 
     public function oralSession(Request $request, string $sessionId): Response
     {
-        $session = $this->call(fn () => AiWorkflowService::session($this->id($sessionId)));
-        if ($session === null) {
-            throw ApiException::notFound('采访会话不存在');
-        }
+        $session = $this->oralSessionForMember($this->user(), $this->id($sessionId));
         return Api::ok(['session' => $session]);
     }
 
@@ -426,7 +457,9 @@ final class FamilyV2Controller extends BaseController
 
     public function sessionSegments(Request $request, string $sessionId): Response
     {
-        return Api::ok(['items' => $this->call(fn () => AiWorkflowService::segments($this->id($sessionId)))]);
+        $sessionId = $this->id($sessionId);
+        $this->oralSessionForMember($this->user(), $sessionId);
+        return Api::ok(['items' => $this->call(fn () => AiWorkflowService::segments($sessionId))]);
     }
 
     public function transcribeSession(Request $request, string $sessionId): Response
@@ -463,6 +496,13 @@ final class FamilyV2Controller extends BaseController
 
     public function exportSession(Request $request, string $sessionId): Response
     {
-        return Api::ok($this->call(fn () => AiWorkflowService::exportSessionTranscript($this->user(), $this->id($sessionId))));
+        $user = $this->user();
+        $sessionId = $this->id($sessionId);
+        $session = AiWorkflowService::session($sessionId);
+        if ($session === null) {
+            throw ApiException::notFound('会话不存在');
+        }
+        $this->assertOralExport($user, (int) $session['family_id']);
+        return Api::ok($this->call(fn () => AiWorkflowService::exportSessionTranscript($user, $sessionId)));
     }
 }

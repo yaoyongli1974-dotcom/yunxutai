@@ -4138,6 +4138,45 @@ test('P4：归档清理同时删除原始副本与处理后文件', function ():
     @unlink($tmp);
 });
 
+echo "\n[Phase 5：口述会话资源级权限]\n";
+
+test('P5：跨家族用户不能读取他族会话列表、详情与转写片段', function (): void {
+    $owner = make_family_user('p5-oral-owner');
+    $outsider = make_family_user('p5-oral-out');
+    $familyId = \App\Services\FamilyService::create($owner, 'P5 口述家族', 'p5-oral-' . bin2hex(random_bytes(3)), ['privacy' => 'private']);
+    $sessionId = \App\Services\AiWorkflowService::createOralSession($owner, $familyId, ['title' => '私密访谈']);
+    \App\Services\AiWorkflowService::setConsent($owner, $sessionId, true);
+    $outsiderToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $outsider['email'], 'password' => 'FamilyTest@123',
+    ]));
+    check($outsiderToken !== '', '越权测试用户应能取得 token');
+
+    $list = api('GET', '/api/v1/families/' . $familyId . '/ai/sessions', null, $outsiderToken);
+    check($list['status'] === 404, '跨家族会话列表应 404');
+    $one = api('GET', '/api/v1/ai/sessions/' . $sessionId, null, $outsiderToken);
+    check($one['status'] === 404, '跨家族会话详情应 404');
+    $segments = api('GET', '/api/v1/ai/sessions/' . $sessionId . '/segments', null, $outsiderToken);
+    check($segments['status'] === 404, '跨家族转写片段应 404');
+});
+
+test('P5：public 家族下非成员不能导出会话转录，owner 可以', function (): void {
+    $owner = make_family_user('p5-export-owner');
+    $outsider = make_family_user('p5-export-out');
+    $familyId = \App\Services\FamilyService::create($owner, 'P5 公开家族', 'p5-export-' . bin2hex(random_bytes(3)), ['privacy' => 'public']);
+    $sessionId = \App\Services\AiWorkflowService::createOralSession($owner, $familyId, ['title' => '公开家族访谈']);
+    $ownerToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $owner['email'], 'password' => 'FamilyTest@123',
+    ]));
+    $outsiderToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $outsider['email'], 'password' => 'FamilyTest@123',
+    ]));
+
+    $denied = api('GET', '/api/v1/ai/sessions/' . $sessionId . '/export', null, $outsiderToken);
+    check($denied['status'] === 404, 'public 家族非成员不得导出会话转录');
+    $allowed = api('GET', '/api/v1/ai/sessions/' . $sessionId . '/export', null, $ownerToken);
+    check($allowed['status'] === 200, '家族 owner 应可导出会话转录');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {
