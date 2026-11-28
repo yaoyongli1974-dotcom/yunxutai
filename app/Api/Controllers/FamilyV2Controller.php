@@ -295,7 +295,7 @@ final class FamilyV2Controller extends BaseController
                 'step_done' => $done,
                 'can_cancel' => in_array($status, ['queued', 'processing', 'failed'], true),
                 'can_retry' => $status === 'failed',
-                'deadline_at' => null,
+                'deadline_at' => $wf['deadline_at'] ?? null,
                 'last_updated_at' => $wf['updated_at'] ?? null,
                 'error_message' => $wf['error_message'] ?? null,
             ],

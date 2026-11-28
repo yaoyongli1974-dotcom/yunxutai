@@ -3887,6 +3887,87 @@ test('P1：任务状态 API 返回真实步骤进度与可执行动作', functio
     check(is_array($data['steps'] ?? null), '应返回步骤列表');
 });
 
+echo "\n[Phase 2：工作流截止时间与超时]\n";
+
+test('P2：AI 超时/租约/重试配置有合法上下限', function (): void {
+    $specs = [
+        ['ai.provider_timeout_seconds', 5, 600],
+        ['ai.workflow_timeout_seconds', 60, 86400],
+        ['ai.step_timeout_seconds', 5, 3600],
+        ['ai.worker_lease_seconds', 60, 7200],
+        ['ai.max_retries', 0, 10],
+        ['ai.retry_backoff_seconds', 1, 3600],
+    ];
+    foreach ($specs as [$key, $min, $max]) {
+        $value = (int) config($key, -1);
+        check($value >= $min && $value <= $max, '配置越界：' . $key . '=' . $value);
+    }
+});
+
+test('P2：创建任务写入截止时间，状态 API 返回真实 deadline', function (): void {
+    $owner = make_family_user('p2-deadline');
+    $familyId = \App\Services\FamilyService::create($owner, '截止家族', 'p2-dl-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', ['text' => '家族资料'], 'p2-dl');
+    $row = Db::fetch('SELECT * FROM ai_workflows WHERE id = ? LIMIT 1', [$id]);
+    check($row !== null && !empty($row['deadline_at']), '任务应写入 deadline_at');
+    check(strtotime((string) $row['deadline_at']) > time(), '截止时间应在未来');
+    check((int) $row['workflow_timeout_seconds'] > 0, '应记录工作流超时预算');
+
+    $token = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $owner['email'], 'password' => 'FamilyTest@123',
+    ]));
+    $detail = api('GET', '/api/v1/ai/workflows/' . $id, null, $token);
+    check($detail['status'] === 200, '工作流详情应 200');
+    check(($detail['data']['data']['workflow']['deadline_at'] ?? null) === $row['deadline_at'], 'API 应返回真实 deadline_at');
+});
+
+test('P2：过期任务不可领取，租约超时回收时按 workflow_timeout 取消', function (): void {
+    $owner = make_family_user('p2-expire');
+    $familyId = \App\Services\FamilyService::create($owner, '过期家族', 'p2-exp-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', ['text' => '过期资料'], 'p2-exp');
+    Db::update('ai_workflows', ['deadline_at' => date('Y-m-d H:i:s', time() - 10)], 'id = ?', [$id]);
+    $claimed = \App\Services\AiWorkflowService::claimStrict('p2-worker', 50);
+    $ids = array_map('intval', array_column($claimed, 'id'));
+    check(!in_array($id, $ids, true), '已过期任务不应被领取');
+
+    Db::update('ai_workflows', [
+        'status' => 'processing',
+        'locked_by' => 'p2-worker',
+        'lease_until' => date('Y-m-d H:i:s', time() - 10),
+        'lock_version' => 1,
+    ], 'id = ?', [$id]);
+    \App\Services\AiWorkflowService::recoverExpired();
+    $after = Db::fetch('SELECT status, failure_class FROM ai_workflows WHERE id = ? LIMIT 1', [$id]);
+    check($after !== null && (string) $after['status'] === 'cancelled', '过期任务应被取消');
+    check((string) $after['failure_class'] === 'workflow_timeout', '失败分类应为 workflow_timeout');
+});
+
+test('P2：执行期发现全局超时后停止且不写入步骤结果', function (): void {
+    $owner = make_family_user('p2-stop');
+    $familyId = \App\Services\FamilyService::create($owner, '停止家族', 'p2-stop-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', ['text' => '停止资料'], 'p2-stop');
+    $claimed = \App\Services\AiWorkflowService::claimStrict('p2-worker-b', 50);
+    $token = null;
+    foreach ($claimed as $row) {
+        if ((int) $row['id'] === $id) {
+            $token = (int) $row['lock_version'];
+            break;
+        }
+    }
+    check($token !== null, '任务应被领取');
+    Db::update('ai_workflows', ['deadline_at' => date('Y-m-d H:i:s', time() - 1)], 'id = ?', [$id]);
+    try {
+        \App\Services\AiWorkflowService::process($id, 'p2-worker-b', $token);
+        check(false, '超时任务不应继续完成');
+    } catch (RuntimeException $e) {
+        check(str_contains($e->getMessage(), 'workflow_timeout'), '拒绝原因应为 workflow_timeout');
+    }
+    $after = Db::fetch('SELECT status, failure_class, retry_count FROM ai_workflows WHERE id = ? LIMIT 1', [$id]);
+    check($after !== null && (string) $after['failure_class'] === 'workflow_timeout', '应记录超时失败分类');
+    check((int) $after['retry_count'] >= (int) config('ai.max_retries', 3), '超时任务不得自动重试');
+    check(db_count('ai_workflow_steps', "workflow_id = ? AND status = 'completed'", [$id]) === 0, '超时后不得写入已完成步骤');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

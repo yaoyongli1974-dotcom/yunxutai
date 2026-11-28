@@ -44,6 +44,36 @@ final class AiWorkflowService
         'rejected' => [],
     ];
 
+    /** 工作流总超时（秒），带类型/上下限校验。 */
+    private static function workflowTimeout(): int
+    {
+        return max(60, min(86400, (int) config('ai.workflow_timeout_seconds', 1800)));
+    }
+
+    /** 单步骤超时（秒），不得大于总超时。 */
+    private static function stepTimeout(): int
+    {
+        return max(5, min(3600, min(self::workflowTimeout(), (int) config('ai.step_timeout_seconds', 300))));
+    }
+
+    /** Worker 租约（秒），续租按三分之一周期执行。 */
+    private static function leaseSeconds(): int
+    {
+        return max(60, min(7200, (int) config('ai.worker_lease_seconds', 900)));
+    }
+
+    /** 最大重试次数，全局上限优先于单行配置。 */
+    private static function maxRetries(): int
+    {
+        return max(0, min(10, (int) config('ai.max_retries', 3)));
+    }
+
+    /** 重试退避上限（秒）。 */
+    private static function retryBackoff(): int
+    {
+        return max(1, min(3600, (int) config('ai.retry_backoff_seconds', 60)));
+    }
+
     /** 创建任务；幂等键在同一家族同一类型内唯一。 */
     public static function create(?array $user, int $familyId, string $type, array $input, ?string $idempotencyKey = null): int
     {
@@ -75,6 +105,9 @@ final class AiWorkflowService
                     'provider' => AiClientFactory::resolve('text')['provider'],
                     'prompt_version' => self::PROMPT_VERSION,
                     'created_by' => (int) ($user['id'] ?? 0),
+                    'deadline_at' => date('Y-m-d H:i:s', time() + self::workflowTimeout()),
+                    'workflow_timeout_seconds' => self::workflowTimeout(),
+                    'step_timeout_seconds' => self::stepTimeout(),
                 ]);
                 foreach (self::TYPES[$type][1] as $index => $step) {
                     Db::insert('ai_workflow_steps', [
@@ -139,6 +172,7 @@ final class AiWorkflowService
                 "SELECT id, workflow_type, lock_version FROM ai_workflows
                  WHERE status IN ('queued', 'failed') AND run_after <= NOW()
                    AND retry_count < max_retries
+                   AND (deadline_at IS NULL OR deadline_at > NOW())
                  ORDER BY id ASC LIMIT {$limit}
                  FOR UPDATE SKIP LOCKED"
             );
@@ -153,12 +187,13 @@ final class AiWorkflowService
                 $updated = Db::update('ai_workflows', [
                     'status' => 'processing',
                     'locked_by' => $workerId,
-                    'lease_until' => date('Y-m-d H:i:s', time() + 900),
+                    'lease_until' => date('Y-m-d H:i:s', time() + self::leaseSeconds()),
                     'heartbeat_at' => date('Y-m-d H:i:s'),
                     'current_step' => $stepName,
                     'started_at' => date('Y-m-d H:i:s'),
                     'lock_version' => (int) $row['lock_version'] + 1,
-                ], "id = ? AND status IN ('queued','failed') AND run_after <= NOW() AND retry_count < max_retries", [$id]);
+                ], "id = ? AND status IN ('queued','failed') AND run_after <= NOW() AND retry_count < max_retries
+                    AND (deadline_at IS NULL OR deadline_at > NOW())", [$id]);
                 if ($updated !== 1) {
                     continue;
                 }
@@ -181,7 +216,7 @@ final class AiWorkflowService
     {
         $updated = Db::update(
             'ai_workflows',
-            ['heartbeat_at' => date('Y-m-d H:i:s'), 'lease_until' => date('Y-m-d H:i:s', time() + 900)],
+            ['heartbeat_at' => date('Y-m-d H:i:s'), 'lease_until' => date('Y-m-d H:i:s', time() + self::leaseSeconds())],
             "id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?
              AND (lease_until IS NULL OR lease_until > NOW())",
             [$id, $workerId, $lockVersion]
@@ -231,7 +266,25 @@ final class AiWorkflowService
                 }
                 continue;
             }
-            $max = (int) Db::value('SELECT max_retries FROM ai_workflows WHERE id = ?', [$id]);
+            $deadline = Db::value('SELECT deadline_at FROM ai_workflows WHERE id = ?', [$id]);
+            if ($deadline !== null && strtotime((string) $deadline) <= time()) {
+                $ok = Db::update('ai_workflows', [
+                    'status' => 'cancelled',
+                    'failure_class' => 'workflow_timeout',
+                    'error_message' => '工作流已超过全局截止时间，不再重试',
+                    'last_error_at' => date('Y-m-d H:i:s'),
+                    'locked_by' => null,
+                    'lease_until' => null,
+                    'heartbeat_at' => null,
+                    'lock_version' => (int) $row['lock_version'] + 1,
+                ], "id = ? AND status = 'processing' AND lease_until IS NOT NULL AND lease_until < NOW()
+                    AND locked_by = ? AND lock_version = ?", [$id, (string) $row['locked_by'], (int) $row['lock_version']]);
+                if ($ok === 1) {
+                    Audit::log('ai.workflow.timeout', 'ai_workflow', $id, ['previous_worker' => (string) $row['locked_by']]);
+                }
+                continue;
+            }
+            $max = min((int) Db::value('SELECT max_retries FROM ai_workflows WHERE id = ?', [$id]), self::maxRetries());
             $retry = min((int) $row['retry_count'] + 1, $max);
             $ok = Db::update('ai_workflows', [
                 'status' => $retry < $max ? 'queued' : 'failed',
@@ -243,7 +296,7 @@ final class AiWorkflowService
                 'heartbeat_at' => null,
                 'lock_version' => (int) $row['lock_version'] + 1,
                 'retry_count' => $retry,
-                'run_after' => date('Y-m-d H:i:s', time() + ($retry < $max ? min(60, 2 ** ($retry - 1)) : 0)),
+                'run_after' => date('Y-m-d H:i:s', time() + ($retry < $max ? min(self::retryBackoff(), 2 ** ($retry - 1)) : 0)),
             ], "id = ? AND status = 'processing' AND lease_until IS NOT NULL AND lease_until < NOW()
                 AND locked_by = ? AND lock_version = ?", [$id, (string) $row['locked_by'], (int) $row['lock_version']]);
             if ($ok !== 1) {
@@ -321,6 +374,11 @@ final class AiWorkflowService
         $familyId = (int) $workflow['family_id'];
         try {
             self::assertRunAuthorized($type, $input, $familyId);
+            $deadlineAt = $workflow['deadline_at'] ?? null;
+            if ($deadlineAt !== null && strtotime((string) $deadlineAt) <= time()) {
+                throw new RuntimeException('workflow_timeout');
+            }
+            $stepBudgetEnd = time() + self::stepTimeout();
             // R-10：步骤状态由真实执行过程驱动；执行在事务外，最终一次性原子写入。
             $executionId = bin2hex(random_bytes(16));
             $currentStepName = null;
@@ -332,6 +390,17 @@ final class AiWorkflowService
                 $currentStepName = (string) $step['name'];
                 if (!self::owns($id, $workerId, $lockVersion)) {
                     throw new RuntimeException('任务持有权在步骤执行前失效');
+                }
+                // 每步执行前重新读取任务状态：取消/全局超时/步骤预算耗尽都必须停止。
+                $live = Db::fetch('SELECT status, deadline_at FROM ai_workflows WHERE id = ? LIMIT 1', [$id]);
+                if ($live === null || (string) $live['status'] === 'cancelled') {
+                    throw new HttpException(409, '任务已取消，不再继续执行');
+                }
+                if (($live['deadline_at'] ?? null) !== null && strtotime((string) $live['deadline_at']) <= time()) {
+                    throw new RuntimeException('workflow_timeout');
+                }
+                if (time() >= $stepBudgetEnd) {
+                    throw new RuntimeException('step_timeout');
                 }
                 $from = (string) $step['status'];
                 if (!isset(self::STEP_TRANSITIONS[$from]) || !in_array('processing', self::STEP_TRANSITIONS[$from], true)) {
@@ -429,16 +498,26 @@ final class AiWorkflowService
             return self::find($id) ?? $workflow;
         } catch (Throwable $e) {
             $retry = (int) $workflow['retry_count'] + 1;
-            $max = (int) $workflow['max_retries'];
-            $class = $e instanceof HttpException
-                ? 'input_error'
-                : ($e instanceof ProcessingException ? $e->category : 'provider_error');
-            // 参数/授权错误一律不重试；Provider 明确标记不可重试的错误也不再重试
-            if ($class === 'input_error' || ($e instanceof ProcessingException && $e->retryable === false)) {
+            $max = min((int) $workflow['max_retries'], self::maxRetries());
+            $message = $e->getMessage();
+            if ($e instanceof HttpException) {
+                $class = 'input_error';
+            } elseif ($message === 'workflow_timeout') {
+                $class = 'workflow_timeout';
+            } elseif ($message === 'step_timeout') {
+                $class = 'step_timeout';
+            } elseif ($e instanceof ProcessingException) {
+                $class = $e->category;
+            } else {
+                $class = 'provider_error';
+            }
+            // 参数/授权、超时、取消、Provider 明确不可重试的错误都不再自动重试
+            if ($class === 'input_error' || in_array($class, ['workflow_timeout', 'step_timeout'], true)
+                || ($e instanceof ProcessingException && $e->retryable === false)) {
                 $retry = $max;
             }
             $status = $retry < $max ? 'queued' : 'failed';
-            $delay = min(60, 2 ** max(0, $retry - 1));
+            $delay = min(self::retryBackoff(), 2 ** max(0, $retry - 1));
             $failedStepName = $currentStepName ?? null;
             Db::transaction(static function () use ($id, $status, $retry, $class, $delay, $e, $workerId, $lockVersion, $failedStepName): void {
                 if (!self::owns($id, $workerId, $lockVersion)) {
