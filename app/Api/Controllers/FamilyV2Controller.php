@@ -272,6 +272,14 @@ final class FamilyV2Controller extends BaseController
             throw ApiException::notFound('AI 任务不存在');
         }
         // F-03：只返回必要字段，不暴露 input_json / provider / 存储路径 / 内部错误。
+        $steps = AiWorkflowService::visibleSteps($this->user(), (int) $wf['id']);
+        $done = 0;
+        foreach ($steps as $step) {
+            if (in_array((string) ($step['status'] ?? ''), ['completed', 'approved', 'rejected', 'skipped'], true)) {
+                $done++;
+            }
+        }
+        $status = (string) ($wf['status'] ?? '');
         return Api::ok([
             'workflow' => [
                 'id' => (int) $wf['id'],
@@ -281,8 +289,17 @@ final class FamilyV2Controller extends BaseController
                 'created_at' => $wf['created_at'] ?? null,
                 'finished_at' => $wf['finished_at'] ?? null,
                 'failure_class' => $wf['failure_class'] ?? null,
+                // Phase 1：真实状态与可执行动作，前端不再自行推断。
+                'progress' => $steps === [] ? 0 : (int) round($done * 100 / count($steps)),
+                'step_total' => count($steps),
+                'step_done' => $done,
+                'can_cancel' => in_array($status, ['queued', 'processing', 'failed'], true),
+                'can_retry' => $status === 'failed',
+                'deadline_at' => null,
+                'last_updated_at' => $wf['updated_at'] ?? null,
+                'error_message' => $wf['error_message'] ?? null,
             ],
-            'steps' => AiWorkflowService::visibleSteps($this->user(), (int) $wf['id']),
+            'steps' => $steps,
         ]);
     }
 

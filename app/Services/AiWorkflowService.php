@@ -31,6 +31,19 @@ final class AiWorkflowService
 
     public const PROMPT_VERSION = 'v1';
 
+    /** 步骤状态转换规则：queued ≡ pending，processing ≡ running（兼容既有前端标签）。 */
+    private const STEP_TRANSITIONS = [
+        'queued' => ['processing', 'cancelled'],
+        'processing' => ['completed', 'awaiting_review', 'failed', 'cancelled', 'queued'],
+        'failed' => ['processing', 'cancelled'],
+        'awaiting_review' => ['approved', 'rejected'],
+        'completed' => [],
+        'skipped' => [],
+        'cancelled' => [],
+        'approved' => [],
+        'rejected' => [],
+    ];
+
     /** 创建任务；幂等键在同一家族同一类型内唯一。 */
     public static function create(?array $user, int $familyId, string $type, array $input, ?string $idempotencyKey = null): int
     {
@@ -308,19 +321,68 @@ final class AiWorkflowService
         $familyId = (int) $workflow['family_id'];
         try {
             self::assertRunAuthorized($type, $input, $familyId);
-            $output = self::run($type, $input);
-            Db::transaction(static function () use ($id, $output, $familyId, $workflow, $input, $workerId, $lockVersion): void {
+            // R-10：步骤状态由真实执行过程驱动；执行在事务外，最终一次性原子写入。
+            $executionId = bin2hex(random_bytes(16));
+            $currentStepName = null;
+            $stepWrites = [];
+            $output = null;
+            $steps = Db::fetchAll('SELECT * FROM ai_workflow_steps WHERE workflow_id = ? ORDER BY step_no', [$id]);
+            $generatingSteps = ['recognize', 'transcribe', 'extract_candidates', 'compose', 'validate_consent'];
+            foreach ($steps as $step) {
+                $currentStepName = (string) $step['name'];
+                if (!self::owns($id, $workerId, $lockVersion)) {
+                    throw new RuntimeException('任务持有权在步骤执行前失效');
+                }
+                $from = (string) $step['status'];
+                if (!isset(self::STEP_TRANSITIONS[$from]) || !in_array('processing', self::STEP_TRANSITIONS[$from], true)) {
+                    throw new RuntimeException('步骤当前状态不允许执行：' . $currentStepName);
+                }
+                $startedAt = date('Y-m-d H:i:s');
+                // 真正的模型/OCR 调用只发生一次，且发生在需要产出内容的步骤。
+                if ($output === null && in_array($currentStepName, $generatingSteps, true)) {
+                    $output = self::run($type, $input);
+                }
+                $target = $currentStepName === 'review_draft' ? 'awaiting_review' : 'completed';
+                $stepWrites[] = [
+                    'id' => (int) $step['id'],
+                    'name' => $currentStepName,
+                    'from' => $from,
+                    'to' => $target,
+                    'started_at' => $startedAt,
+                    'finished_at' => date('Y-m-d H:i:s'),
+                    'attempt' => (int) ($step['step_attempt'] ?? 0) + 1,
+                    'output_ref' => $target === 'awaiting_review' ? 'pending_review' : 'output_json',
+                    'execution_id' => $executionId,
+                ];
+            }
+            if ($output === null) {
+                $output = self::run($type, $input);
+            }
+            Db::transaction(static function () use ($id, $familyId, $workflow, $input, $output, $workerId, $lockVersion, $stepWrites, $executionId): void {
                 if (!self::owns($id, $workerId, $lockVersion)) {
                     throw new RuntimeException('任务持有权在提交前失效');
                 }
-                $steps = Db::fetchAll('SELECT id, name FROM ai_workflow_steps WHERE workflow_id = ? ORDER BY step_no', [$id]);
-                foreach ($steps as $step) {
-                    Db::update('ai_workflow_steps', [
-                        'status' => 'completed',
+                foreach ($stepWrites as $write) {
+                    $updated = Db::update('ai_workflow_steps', [
+                        'status' => $write['to'],
                         'input_ref' => json_encode(['workflow_id' => $id, 'family_id' => $familyId], JSON_UNESCAPED_UNICODE),
-                        'output_ref' => (string) $step['name'] === 'review_draft' ? 'pending_review' : 'output_json',
-                        'finished_at' => date('Y-m-d H:i:s'),
-                    ], 'id = ?', [(int) $step['id']]);
+                        'output_ref' => $write['output_ref'],
+                        'error_message' => null,
+                        'step_error_code' => null,
+                        'step_attempt' => $write['attempt'],
+                        'execution_id' => $executionId,
+                        'step_updated_at' => $write['finished_at'],
+                        'started_at' => $write['started_at'],
+                        'finished_at' => $write['finished_at'],
+                    ], 'id = ? AND status = ?', [(int) $write['id'], $write['from']]);
+                    if ($updated !== 1) {
+                        throw new RuntimeException('步骤状态已被其他执行者更新：' . $write['name']);
+                    }
+                    self::recordStepTransition($id, (int) $write['id'], (string) $write['name'], $write['from'], $write['to'], [
+                        'worker_id' => $workerId,
+                        'execution_id' => $executionId,
+                        'attempt' => $write['attempt'],
+                    ]);
                 }
                 Db::update('ai_workflows', [
                     'status' => 'completed',
@@ -375,24 +437,46 @@ final class AiWorkflowService
             if ($class === 'input_error' || ($e instanceof ProcessingException && $e->retryable === false)) {
                 $retry = $max;
             }
-            Db::update('ai_workflow_steps', [
-                'status' => 'failed',
-                'error_message' => mb_substr($e->getMessage(), 0, 200),
-                'finished_at' => date('Y-m-d H:i:s'),
-            ], 'workflow_id = ? AND status = \'processing\'', [$id]);
             $status = $retry < $max ? 'queued' : 'failed';
             $delay = min(60, 2 ** max(0, $retry - 1));
-            Db::update('ai_workflows', [
-                'status' => $status,
-                'retry_count' => $retry,
-                'failure_class' => $class,
-                'error_message' => mb_substr($e->getMessage(), 0, 200),
-                'lease_until' => null,
-                'locked_by' => null,
-                'run_after' => date('Y-m-d H:i:s', time() + ($status === 'queued' ? $delay : 0)),
-            ], "id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?",
-                [$id, $workerId, $lockVersion]);
-            Db::update('ai_workflows', ['last_error_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
+            $failedStepName = $currentStepName ?? null;
+            Db::transaction(static function () use ($id, $status, $retry, $class, $delay, $e, $workerId, $lockVersion, $failedStepName): void {
+                if (!self::owns($id, $workerId, $lockVersion)) {
+                    return; // 租约已失效/被取消：旧 Worker 不得写入任何失败状态
+                }
+                if ($failedStepName !== null) {
+                    $step = Db::fetch(
+                        'SELECT * FROM ai_workflow_steps WHERE workflow_id = ? AND name = ? LIMIT 1',
+                        [$id, $failedStepName]
+                    );
+                    if ($step !== null && in_array((string) $step['status'], ['queued', 'processing', 'failed'], true)) {
+                        $from = (string) $step['status'];
+                        Db::update('ai_workflow_steps', [
+                            'status' => 'failed',
+                            'error_message' => mb_substr($e->getMessage(), 0, 200),
+                            'step_error_code' => mb_substr($class, 0, 64),
+                            'step_updated_at' => date('Y-m-d H:i:s'),
+                            'finished_at' => date('Y-m-d H:i:s'),
+                        ], 'id = ? AND status = ?', [(int) $step['id'], $from]);
+                        self::recordStepTransition($id, (int) $step['id'], $failedStepName, $from, 'failed', [
+                            'worker_id' => $workerId,
+                            'error_code' => $class,
+                            'attempt' => (int) ($step['step_attempt'] ?? 0) + 1,
+                        ]);
+                    }
+                }
+                Db::update('ai_workflows', [
+                    'status' => $status,
+                    'retry_count' => $retry,
+                    'failure_class' => $class,
+                    'error_message' => mb_substr($e->getMessage(), 0, 200),
+                    'lease_until' => null,
+                    'locked_by' => null,
+                    'run_after' => date('Y-m-d H:i:s', time() + ($status === 'queued' ? $delay : 0)),
+                    'last_error_at' => date('Y-m-d H:i:s'),
+                ], "id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?",
+                    [$id, $workerId, $lockVersion]);
+            });
             Audit::log('ai.workflow.failed', 'ai_workflow', $id, [
                 'class' => $class, 'retry' => $retry, 'error_hash' => hash('sha256', $e->getMessage()),
             ]);
@@ -421,8 +505,94 @@ final class AiWorkflowService
              lock_version = lock_version + 1, finished_at = ? WHERE id = ?",
             [date('Y-m-d H:i:s'), $id]
         );
-        Db::update('ai_workflow_steps', ['status' => 'skipped'], 'workflow_id = ? AND status IN (\'queued\',\'failed\')', [$id]);
+        Db::transaction(static function () use ($id, $user): void {
+            $steps = Db::fetchAll(
+                "SELECT id, name, status FROM ai_workflow_steps
+                 WHERE workflow_id = ? AND status IN ('queued','failed','processing','awaiting_review') ORDER BY step_no",
+                [$id]
+            );
+            foreach ($steps as $step) {
+                $from = (string) $step['status'];
+                $updated = Db::update(
+                    'ai_workflow_steps',
+                    ['status' => 'cancelled', 'step_updated_at' => date('Y-m-d H:i:s'), 'finished_at' => date('Y-m-d H:i:s')],
+                    'id = ? AND status = ?',
+                    [(int) $step['id'], $from]
+                );
+                if ($updated === 1) {
+                    self::recordStepTransition($id, (int) $step['id'], (string) $step['name'], $from, 'cancelled', [
+                        'actor_type' => 'user',
+                        'actor_id' => (int) ($user['id'] ?? 0),
+                    ]);
+                }
+            }
+        });
         Audit::log('ai.workflow.cancelled', 'ai_workflow', $id, ['family_id' => $familyId], (int) ($user['id'] ?? 0));
+    }
+
+    /** 记录一步状态转换；与步骤更新共用同一事务。 */
+    private static function recordStepTransition(
+        int $workflowId,
+        ?int $stepId,
+        ?string $stepName,
+        ?string $from,
+        string $to,
+        array $context = []
+    ): void {
+        Db::insert('ai_workflow_step_transitions', [
+            'workflow_id' => $workflowId,
+            'step_id' => $stepId,
+            'step_name' => $stepName === null ? null : mb_substr($stepName, 0, 60),
+            'previous_status' => $from,
+            'new_status' => $to,
+            'actor_type' => (string) ($context['actor_type'] ?? 'worker'),
+            'actor_id' => isset($context['actor_id']) ? (int) $context['actor_id'] : null,
+            'worker_id' => isset($context['worker_id']) ? mb_substr((string) $context['worker_id'], 0, 128) : null,
+            'execution_id' => $context['execution_id'] ?? null,
+            'attempt' => (int) ($context['attempt'] ?? 0),
+            'error_code' => isset($context['error_code']) ? mb_substr((string) $context['error_code'], 0, 64) : null,
+            'request_id' => $GLOBALS['request_id'] ?? null,
+        ]);
+    }
+
+    /** 人工审核步骤：awaiting_review → approved / rejected，保留转换历史。 */
+    public static function reviewStep(?array $user, int $stepId, string $status): void
+    {
+        $step = Db::fetch('SELECT * FROM ai_workflow_steps WHERE id = ? LIMIT 1', [$stepId]);
+        if ($step === null) {
+            throw new HttpException(404, '步骤不存在');
+        }
+        $workflow = self::find((int) $step['workflow_id']);
+        if ($workflow === null) {
+            throw new HttpException(404, '任务不存在');
+        }
+        $familyId = (int) $workflow['family_id'];
+        Policy::require('ai.result.review', ['family_id' => $familyId, 'resource' => null], $user);
+        if (!in_array($status, ['approved', 'rejected'], true)) {
+            throw new HttpException(422, '审核状态只能是 approved 或 rejected');
+        }
+        Db::transaction(static function () use ($step, $stepId, $status, $workflow, $user): void {
+            $current = Db::fetch('SELECT status FROM ai_workflow_steps WHERE id = ? FOR UPDATE', [$stepId]);
+            if ($current === null || (string) $current['status'] !== 'awaiting_review') {
+                throw new HttpException(409, '该步骤当前不处于待审核状态');
+            }
+            $updated = Db::update(
+                'ai_workflow_steps',
+                ['status' => $status, 'step_updated_at' => date('Y-m-d H:i:s'), 'finished_at' => date('Y-m-d H:i:s')],
+                'id = ? AND status = ?',
+                [$stepId, 'awaiting_review']
+            );
+            if ($updated !== 1) {
+                throw new HttpException(409, '步骤状态已被其他审核者更新');
+            }
+            self::recordStepTransition((int) $workflow['id'], $stepId, (string) $step['name'], 'awaiting_review', $status, [
+                'actor_type' => 'user',
+                'actor_id' => (int) ($user['id'] ?? 0),
+            ]);
+        });
+        Audit::log('ai.step.reviewed', 'ai_workflow_step', $stepId, [
+            'workflow_id' => (int) $workflow['id'], 'family_id' => $familyId, 'status' => $status,
+        ], (int) ($user['id'] ?? 0));
     }
 
     /** AI 生成的事实一律 pending；确认只能通过人工审核接口。 */

@@ -3774,6 +3774,119 @@ test('E：10 个 Worker 并发领取同一任务只有一个有效执行者', fu
     check(str_starts_with((string) $workflow['locked_by'], 'e-worker-'), 'locked_by 应为并发 Worker 之一');
 });
 
+echo "\n[v2.1.1 Phase 1：AI 工作流真实步骤状态机]\n";
+
+test('P1：步骤由真实执行驱动，成功时审核步骤进入待审核且写入状态历史', function (): void {
+    $owner = make_family_user('p1-step');
+    $familyId = \App\Services\FamilyService::create($owner, '步骤状态家族', 'p1-step-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1990年3月，父亲从北方迁往南方。',
+    ], 'p1-step-' . bin2hex(random_bytes(4)));
+    $result = \App\Services\AiWorkflowService::process($id, 'p1-step-worker');
+    check((string) $result['status'] === 'completed', '工作流应完成');
+    $steps = \App\Services\AiWorkflowService::steps($id);
+    check(count($steps) === 3, '应有 3 个步骤');
+    $byName = [];
+    foreach ($steps as $step) {
+        $byName[(string) $step['name']] = (string) $step['status'];
+    }
+    check(($byName['validate_input'] ?? '') === 'completed', '输入校验步骤应完成');
+    check(($byName['extract_candidates'] ?? '') === 'completed', '提取步骤应完成');
+    check(($byName['review_draft'] ?? '') === 'awaiting_review', '审核步骤应待人工审核，不能自动完成');
+    check(db_count('ai_workflow_step_transitions', 'workflow_id = ?', [$id]) >= 3, '应记录步骤转换历史');
+    check(
+        db_count('ai_workflow_step_transitions', "workflow_id = ? AND new_status = 'awaiting_review'", [$id]) === 1,
+        '应记录一次进入待审核的转换'
+    );
+});
+
+test('P1：人工审核步骤只能从待审核推进，重复审核被拒绝', function (): void {
+    $owner = make_family_user('p1-review');
+    $familyId = \App\Services\FamilyService::create($owner, '步骤审核家族', 'p1-review-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'biography_draft', [
+        'text' => '祖父是一位木匠，1920年生于南方。',
+    ], 'p1-review-' . bin2hex(random_bytes(4)));
+    \App\Services\AiWorkflowService::process($id, 'p1-review-worker');
+    $reviewStep = null;
+    foreach (\App\Services\AiWorkflowService::steps($id) as $step) {
+        if ((string) $step['name'] === 'review_draft') {
+            $reviewStep = $step;
+        }
+    }
+    check($reviewStep !== null, '缺少审核步骤');
+    \App\Services\AiWorkflowService::reviewStep($owner, (int) $reviewStep['id'], 'approved');
+    check(
+        (string) Db::value('SELECT status FROM ai_workflow_steps WHERE id = ?', [(int) $reviewStep['id']]) === 'approved',
+        '审核通过后状态应为 approved'
+    );
+    try {
+        \App\Services\AiWorkflowService::reviewStep($owner, (int) $reviewStep['id'], 'rejected');
+        check(false, '已完成审核不应再次变更');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 409, '重复审核应返回 409');
+    }
+});
+
+test('P1：未执行步骤不能被伪造成已完成', function (): void {
+    $owner = make_family_user('p1-fake');
+    $familyId = \App\Services\FamilyService::create($owner, '防伪造家族', 'p1-fake-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1900年，家族迁居北方。',
+    ], 'p1-fake-' . bin2hex(random_bytes(4)));
+    $first = \App\Services\AiWorkflowService::steps($id)[0] ?? null;
+    check($first !== null, '缺少步骤');
+    // 人为把首步置为 completed，模拟“未执行却已完成”的脏状态。
+    Db::update('ai_workflow_steps', ['status' => 'completed'], 'id = ?', [(int) $first['id']]);
+    try {
+        \App\Services\AiWorkflowService::process($id, 'p1-fake-worker');
+        check(false, '非法步骤状态应阻止执行');
+    } catch (RuntimeException $e) {
+        check(str_contains($e->getMessage(), '状态不允许执行'), '拒绝原因应为非法状态转换');
+    }
+    check((string) Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) !== 'completed', '工作流不应被标记完成');
+    check(
+        (int) Db::value("SELECT COUNT(*) FROM ai_workflow_steps WHERE workflow_id = ? AND status = 'completed'", [$id]) === 1,
+        '不应批量把其余步骤标为完成'
+    );
+});
+
+test('P1：取消工作流时步骤进入 cancelled 并记录转换', function (): void {
+    $owner = make_family_user('p1-cancel');
+    $familyId = \App\Services\FamilyService::create($owner, '取消状态家族', 'p1-cancel-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1995年，家族建立了第一间作坊。',
+    ], 'p1-cancel-' . bin2hex(random_bytes(4)));
+    \App\Services\AiWorkflowService::cancel($owner, $id);
+    check(
+        db_count('ai_workflow_steps', "workflow_id = ? AND status = 'cancelled'", [$id]) === 3,
+        '取消时全部步骤应为 cancelled'
+    );
+    check(
+        db_count('ai_workflow_step_transitions', "workflow_id = ? AND new_status = 'cancelled'", [$id]) === 3,
+        '取消应记录 3 次步骤转换'
+    );
+});
+
+test('P1：任务状态 API 返回真实步骤进度与可执行动作', function (): void {
+    $owner = make_family_user('p1-api');
+    $familyId = \App\Services\FamilyService::create($owner, '状态 API 家族', 'p1-api-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'biography_draft', [
+        'text' => '曾祖母生于 1910 年，擅长刺绣。',
+    ], 'p1-api-' . bin2hex(random_bytes(4)));
+    $token = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => (string) $owner['email'], 'password' => 'FamilyTest@123',
+    ]));
+    check($token !== '', '前置：应取得 token');
+    $response = api('GET', '/api/v1/ai/workflows/' . $id, null, $token);
+    check($response['status'] === 200, '查询任务状态应 200');
+    $data = $response['data']['data'] ?? [];
+    check(isset($data['workflow']['step_total']) && (int) $data['workflow']['step_total'] === 3, '应返回步骤总数');
+    check(isset($data['workflow']['progress']), '应返回进度');
+    check(array_key_exists('can_cancel', $data['workflow']), '应返回 can_cancel');
+    check(array_key_exists('deadline_at', $data['workflow']), '应返回 deadline_at');
+    check(is_array($data['steps'] ?? null), '应返回步骤列表');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

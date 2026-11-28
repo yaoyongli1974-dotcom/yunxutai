@@ -13,6 +13,7 @@ const STATUS_LABELS = {
 };
 const STEP_STATUS_LABELS = {
   queued: '排队中', processing: '处理中', completed: '已完成', failed: '失败', skipped: '已跳过',
+  cancelled: '已取消', awaiting_review: '待人工审核', approved: '审核通过', rejected: '审核驳回',
 };
 const TYPE_LABELS = { extract_facts: '事实提取', transcribe_audio: '口述转写' };
 const CONSENT_LABELS = { none: '待授权', granted: '已授权', revoked: '已撤回' };
