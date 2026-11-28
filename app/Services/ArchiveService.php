@@ -207,7 +207,7 @@ final class ArchiveService
                 ], $user === null ? 0 : (int) $user['id']);
                 return $id;
             });
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             // 文件系统无法与 MySQL 共享事务：失败时补偿删除已落盘文件。
             $path = Storage::absolute((string) $stored['disk_path']);
             if ($path !== null && is_file($path)) {

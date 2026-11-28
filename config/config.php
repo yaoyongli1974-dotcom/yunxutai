@@ -24,7 +24,7 @@ if ($appEnv === 'production' && $appDebug) {
 return [
     'app' => [
         'name'        => getenv('APP_NAME') ?: '云叙台',
-        'version'     => getenv('APP_VERSION') ?: 'v2.0.1',
+        'version'     => getenv('APP_VERSION') ?: 'v2.1.0',
         'tagline'     => '记取来时路，安放未尽言',
         'url'         => rtrim((string) (getenv('APP_URL') ?: ''), '/'),
         'env'         => $appEnv,

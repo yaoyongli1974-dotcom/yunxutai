@@ -2178,6 +2178,15 @@ test('2.0 迁移版本记录完整且可重复执行', function (): void {
     foreach ($checksums as $row) {
         check((string) $row['checksum'] !== '', '迁移 checksum 不应为空');
     }
+    // Phase E：逐个比对磁盘迁移文件内容与数据库登记的 checksum，覆盖全部版本而非仅 001-006。
+    $files = glob(BASE_PATH . '/database/migrations/*.php') ?: [];
+    sort($files);
+    $recorded = array_column($checksums, 'checksum');
+    check(count($files) === count($recorded), '迁移文件数与数据库登记数不一致');
+    foreach ($files as $file) {
+        $hash = hash('sha256', (string) file_get_contents($file));
+        check(in_array($hash, $recorded, true), '迁移 checksum 与文件不符：' . basename($file));
+    }
     foreach (['families', 'family_members', 'family_invitations', 'family_persons', 'person_memorial_links'] as $table) {
         check(
             (int) \App\Core\Db::value('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?', [$table]) > 0,
@@ -3346,7 +3355,7 @@ test('Round2 J：档案版本事务与删除状态机', function (): void {
 test('页脚显示版本号印记', function (): void {
     $home = http('GET', '/');
     check_contains($home['body'], 'site-footer__version');
-    check_contains($home['body'], 'v2.0.1');
+    check_contains($home['body'], 'v2.1.0');
 });
 
 test('代码审查：Db 拒绝非法列名', function (): void {
@@ -3707,6 +3716,62 @@ test('D：性能索引迁移已应用', function (): void {
     check(count($personIndex) >= 1, 'family_persons 组合索引缺失');
     $relationIndex = Db::fetchAll("SHOW INDEX FROM person_relationships WHERE Key_name = 'idx_rel_family_id'");
     check(count($relationIndex) >= 1, 'person_relationships 组合索引缺失');
+});
+
+echo "\n[Phase E：最终回归补充]\n";
+
+test('E：AI 工作流完成写入站内通知且只写一次', function (): void {
+    $owner = make_family_user('e-notify');
+    $familyId = \App\Services\FamilyService::create($owner, '通知家族', 'e-notify-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1990年3月，祖父从北方迁往南方。',
+    ], 'e-notify-key');
+    \App\Services\AiWorkflowService::process($id, 'e-inline');
+    check((string) Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) === 'completed', '任务未完成');
+    check(
+        db_count('notifications', "user_id = ? AND type = 'ai_workflow_completed' AND link LIKE ?", [
+            (int) $owner['id'], '%workflow=' . $id,
+        ]) === 1,
+        '应生成且仅生成一条完成通知'
+    );
+});
+
+test('E：10 个 Worker 并发领取同一任务只有一个有效执行者', function (): void {
+    $owner = make_family_user('e-claim-race');
+    $familyId = \App\Services\FamilyService::create($owner, '并发家族', 'e-race-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '并发领取验证资料。',
+    ], 'e-race-' . bin2hex(random_bytes(6)));
+
+    $script = BASE_PATH . '/tests/concurrency/claim-once.php';
+    $processes = [];
+    for ($i = 0; $i < 10; $i++) {
+        $command = 'php ' . escapeshellarg($script) . ' ' . escapeshellarg('e-worker-' . $i) . ' 1';
+        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $pipes = [];
+        $handle = proc_open($command, $descriptors, $pipes);
+        check(is_resource($handle), '无法启动并发领取子进程');
+        $processes[] = [$handle, $pipes];
+    }
+
+    $winners = [];
+    foreach ($processes as [$handle, $pipes]) {
+        $out = trim((string) stream_get_contents($pipes[1]));
+        $err = trim((string) stream_get_contents($pipes[2]));
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $rc = proc_close($handle);
+        check($rc === 0, '并发领取子进程失败：' . $err);
+        $ids = json_decode($out, true);
+        check(is_array($ids), '并发领取输出不是 JSON：' . $out);
+        if (in_array($id, array_map('intval', $ids), true)) {
+            $winners[] = $id;
+        }
+    }
+    check(count($winners) === 1, '同一任务只能被一个 Worker 领取，实际：' . count($winners));
+    $workflow = Db::fetch('SELECT status, locked_by FROM ai_workflows WHERE id = ? LIMIT 1', [$id]);
+    check($workflow !== null && $workflow['status'] === 'processing', '任务应处于 processing');
+    check(str_starts_with((string) $workflow['locked_by'], 'e-worker-'), 'locked_by 应为并发 Worker 之一');
 });
 
 echo "\n========== 结果 ==========\n";

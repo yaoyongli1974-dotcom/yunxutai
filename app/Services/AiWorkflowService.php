@@ -344,6 +344,26 @@ final class AiWorkflowService
                 ]);
             });
             Audit::log('ai.workflow.completed', 'ai_workflow', $id, ['family_id' => $familyId, 'type' => $type]);
+            // R-23：仅在工作流首次成功提交后发一条站内完成通知；通知失败不回滚业务结果。
+            try {
+                $link = '/families/' . $familyId . '/ai?workflow=' . $id;
+                $exists = (int) Db::value(
+                    'SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = ? AND link = ?',
+                    [(int) $workflow['created_by'], 'ai_workflow_completed', $link]
+                );
+                if ($exists === 0) {
+                    \App\Services\NotificationService::emit(
+                        $familyId,
+                        (int) $workflow['created_by'],
+                        'ai_workflow_completed',
+                        'AI 整理任务已完成',
+                        '任务 #' . $id . ' 已完成，请人工审核候选事实后再采用。',
+                        $link
+                    );
+                }
+            } catch (\Throwable $e) {
+                error_log('ai.workflow.notify failed [workflow=' . $id . ']: ' . $e->getMessage());
+            }
             return self::find($id) ?? $workflow;
         } catch (Throwable $e) {
             $retry = (int) $workflow['retry_count'] + 1;

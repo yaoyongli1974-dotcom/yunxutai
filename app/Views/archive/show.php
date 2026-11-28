@@ -36,7 +36,7 @@
                     <td class="muted small"><?= e($file['file_role']) ?></td>
                     <td><a class="text-link" href="<?= e(url('/archives/files/' . (int) $file['id'] . '/download')) ?>">下载</a></td>
                 </tr>
-                <tr><td colspan="4" class="muted small" style="word-break:break-all;">SHA-256 <?= e($file['sha256']) ?></td></tr>
+                <tr><td colspan="4" class="muted small" style="word-break:break-all;">入库文件 SHA-256 <?= e($file['sha256']) ?></td></tr>
                 <?php if (str_starts_with((string) $file['mime_type'], 'image/')): ?>
                     <tr><td colspan="4">
                         <?php if (($photoTags[(int) $file['id']] ?? []) !== []): ?>

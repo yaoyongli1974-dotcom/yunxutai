@@ -127,4 +127,17 @@
 - 阶段报告：`30_USER_EXPERIENCE_REPORT.md`、`31_MINIPROGRAM_REPORT.md`、`32_PERFORMANCE_REPORT.md`、`33_DEPLOYMENT_CHECKLIST.md`；风险登记册 §6 已更新。
 - 门禁：Phase D 已关闭 R-25/R-26/R-27/R-28/R-29 及性能 P-01~P-06；剩余项进入 Phase E；未 push main，未发版，未动生产。
 
-**下一步**：等待人工批准进入 Phase E（最终回归、备份恢复复验、发布准备），并确认版本最终定为 v2.1.0 或 v2.0.2。
+**下一步（已执行）**：用户批准 Phase E、定版 v2.1.0、授权 push 功能分支并开 PR。
+
+---
+
+## Phase E 执行记录（已完成）
+
+- 人工决策（verbatim 要点）：「1.批准进入 Phase E，2.定为 v2.1.0，3.将功能分支 push 到 GitHub 并开 PR」。
+- 版本同步：`.env.example`、`config/config.php`、`README.md`、`SECURITY.md`、`tests/run.php` 页脚断言统一改为 v2.1.0。
+- Phase E 修复：R-18（`catch (\Throwable)` + 清理 2 条过期 PHPStan baseline）、R-22（`TEST_DB` 前缀限制 + 服务器探测失败即退出）、R-23（AI 完成站内通知 + 去重）、迁移 checksum 全量断言；R-20 改为“入库文件 SHA-256”文案。
+- 并发验证：新增 `tests/concurrency/claim-once.php`，10 个子进程真实并发领取同一任务，仅一个有效执行者。
+- 回归：`bash bin/test.sh` **145 通过 / 0 失败**；PHP lint rc=0；composer validate --strict rc=0；PHPStan `[OK] No errors` rc=0；secret-scan rc=0；node --check rc=0；32 迁移 applied + 重复 + checksum 全量比对 rc=0；doctor rc=0（0 阻断，3 警告）；`git diff --check` rc=0。
+- 恢复演练：备份目录 `storage/backups/20261128-145834`，`restore-check` rc=0（3 产物 sha256/bytes OK，tables=56 inserts=19），隔离库导入 + doctor + 行数核对通过，演练库已删除。
+- 阶段报告：`90_FINAL_TEST_REPORT.md`、`91_RELEASE_READINESS_REPORT.md`、`92_ROLLBACK_PLAN.md`、`93_UNRESOLVED_RISKS.md`、`00_MASTER_ACCEPTANCE_REPORT.md`；风险登记册 §7 已更新。
+- 结论：30 个确认问题完全关闭 24、部分修复 4、未修复 2；剩余项见 `93_UNRESOLVED_RISKS.md`。远程四矩阵 CI 按用户授权通过功能分支 PR 验证。

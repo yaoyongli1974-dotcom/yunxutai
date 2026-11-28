@@ -145,3 +145,17 @@
 | R-10/R-11/R-16/R-18/R-20/R-21/R-23 | 未修复，保留至 Phase E | OPEN | `20_AI_WORKFLOW_REPORT.md`、`23_DATABASE_REPORT.md` |
 
 **Phase D 结论**：用户两项决策已执行（补页面、接受 APP_DEBUG 默认关闭）。全量 143/0；32 个迁移版本全 applied；PHP lint / PHPStan / secret-scan / JS check / doctor / `git diff --check` 均 rc=0。未 push main、未发版、未动生产。真机走查、大规模性能数据集、服务端精确引导进度、边缘 CSP 启用列为 E/运维项。
+
+## 7. Phase E 处置结果（2026-11-28）
+
+| ID | 处置 | 结果 | 证据 |
+|---|---|---|---|
+| R-18 | 已修复：`catch (\Throwable)`；清理 PHPStan 过期 baseline 2 条 | PASS | `phpstan [OK] No errors` rc=0 |
+| R-22 | 已修复：`TEST_DB` 前缀限制 + 服务器探测失败即退出 | PASS | `bash bin/test.sh` 145/0 |
+| R-23 | 已修复：AI 完成发站内通知并按 link 去重，失败只记录日志 | PASS | `E：AI 工作流完成写入站内通知且只写一次` |
+| R-16 | 部分修复：迁移 checksum 断言扩展至全部 32 个文件 | PARTIAL | `2.0 迁移版本记录完整且可重复执行` |
+| R-20 | 部分修复：UI 文案改“入库文件 SHA-256”；原始字节哈希仍缺失 | PARTIAL | `app/Views/archive/show.php` |
+| R-11 / R-10 / R-21 / R-30 | 保留残余/OPEN，进入正式发布门槛 | OPEN / PARTIAL | `93_UNRESOLVED_RISKS.md` |
+| N-07 | 残余：可见性绑定 + TTL + no-store，缺 per-user 撤销 | OPEN | `12_MEDIA_SECURITY_REPORT.md` |
+
+**Phase E 结论（30 个确认问题）**：完全关闭 **24** 项，部分修复 **4** 项（R-11/R-16/R-20/R-30），未修复 **2** 项（R-10/R-21）。全量 **145/0**；32 迁移全 applied；备份恢复演练通过；版本定为 v2.1.0；远程 CI 以 PR checks 为准。
