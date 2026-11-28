@@ -24,6 +24,12 @@ final class Db
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
             ]);
+            // 应用用 date() 写入 DATETIME（app.timezone），SQL 侧用 NOW()/CURRENT_TIMESTAMP 比较。
+            // 统一会话时区，避免 CI 容器 UTC 与 PHP +08 造成截止时间判断相差数小时。
+            $offset = date('P');
+            if (preg_match('/^[+-]\d{2}:\d{2}$/', $offset) === 1) {
+                self::$pdo->exec('SET time_zone = ' . self::$pdo->quote($offset));
+            }
         }
         return self::$pdo;
     }

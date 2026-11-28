@@ -36,6 +36,16 @@ if (!is_dir($target) && !mkdir($target, 0750, true) && !is_dir($target)) {
 
 echo "备份开始：{$target}\n";
 
+/** MySQL 8+ 的 mysqldump 在 MariaDB 服务器上会查询 COLUMN_STATISTICS，需要关闭该选项；MariaDB/旧版客户端不支持该参数。 */
+function mysqldumpNeedsNoColumnStatistics(): bool
+{
+    $version = shell_exec('mysqldump --version 2>/dev/null');
+    if (!is_string($version) || stripos($version, 'mariadb') !== false) {
+        return false;
+    }
+    return preg_match('/\b(?:8|9)\.\d+\.\d+/', $version) === 1;
+}
+
 function run(array $command, array $env, ?string $stdoutFile = null): int
 {
     $descriptors = [
@@ -65,6 +75,11 @@ try {
 
     $command = [
         'mysqldump',
+    ];
+    if (mysqldumpNeedsNoColumnStatistics()) {
+        $command[] = '--column-statistics=0';
+    }
+    $command = array_merge($command, [
         '--single-transaction',
         '--quick',
         '--skip-lock-tables',
@@ -73,7 +88,7 @@ try {
         '--port=' . config('db.port'),
         '--user=' . config('db.username'),
         (string) config('db.database'),
-    ];
+    ]);
     run($command, $env, $dumpPath);
     echo "  数据库已导出：" . filesize($dumpPath) . " 字节\n";
 

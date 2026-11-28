@@ -4094,6 +4094,14 @@ test('P7：加密备份需正确密钥核验，错误密钥与篡改均失败', 
     @rmdir($dir);
 });
 
+echo "\n[Phase 10：CI 时区一致性]\n";
+
+test('数据库连接时区与 PHP 应用时区一致', function (): void {
+    $offset = date('P');
+    $diff = (int) Db::value('SELECT TIMESTAMPDIFF(HOUR, NOW(), ?)', [date('Y-m-d H:i:s')]);
+    check(abs($diff) <= 1, "NOW() 与 PHP date() 相差 {$diff} 小时（PHP offset {$offset}）");
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

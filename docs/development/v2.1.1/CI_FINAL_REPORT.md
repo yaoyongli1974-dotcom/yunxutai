@@ -1,7 +1,7 @@
 # Phase 10 — CI 最终报告（本地门禁）
 
-代码基线：`516792b`（Phase 9 提交）；分支 `feature/v2.1.1-production-hardening`。
-**状态标注**：本地门禁全部实跑通过；远程四矩阵 CI **尚未执行**（需授权推送功能分支/开 PR 后才能验证，未执行项不得写为通过）。
+代码基线：`722c256`（Phase 10 报告提交）+ 本地门禁修复（时区一致性、mysqldump 兼容性，待提交）；分支 `feature/v2.1.1-production-hardening`。
+**状态标注**：本地门禁全部实跑通过（最新 167/0）；远程 PR #2 已创建，首轮 CI run `46154385566` 红灯并已定位/修复，等待推送修复后复跑，结果不得提前写为通过。
 
 ## 1. 本地全量门禁（实跑）
 
@@ -31,7 +31,10 @@ PHPStan 12 处初始错误全部为 `bin/seed-performance.php` 的 PHPDoc `limit
 - PHP 8.5 + MariaDB 11
 
 当前仓库 `.github/workflows/ci.yml` 仍为该四矩阵，含 gitleaks、secret-scan、PHP lint、JS check、PHPStan、集成测试、migration status/repeat、doctor。
-**未执行远程验证**：本轮尚未把 `feature/v2.1.1-production-hardening` push 到 GitHub，也未创建 PR。没有真实 run URL/SHA，不能声称 CI 全绿。
+PR #2：https://github.com/yaoyongli1974-dotcom/yunxutai/pull/2（head `722c256`，未合并 main）。首轮 run `46154385566` 为 failure：
+- 四矩阵集成套件均报 P2「过期任务不可领取」失败：PHP `date()` 使用 Asia/Shanghai(+08)，CI 数据库容器 NOW() 为 UTC，`deadline_at > NOW()` 判断错位。修复：`app/Core/Db.php` 在 PDO 连接后按 `date('P')` 执行 `SET time_zone`，并用 quote 绑定。
+- MariaDB 组合额外报 P7 mysqldump `Unknown table 'COLUMN_STATISTICS'`。修复：`bin/backup.php` 按 `mysqldump --version` 判定客户端，仅 MySQL 8/9 加 `--column-statistics=0`，MariaDB 客户端不加。
+以上修复已在本地 167/0 复验，但**尚未在 GitHub Actions 复跑通过**，当前不得声称远程 CI 全绿。
 
 ## 3. 结论
-本地质量门禁全部通过；远程四矩阵 CI 为发布前硬门禁，仍待授权执行。执行后需回填本报告的 run URL、SHA、4/4 job 与全部 step 结果。
+本地质量门禁全部通过（167/0，日志 `/tmp/opencode/v2.1.1/phase10/fix2/`）；远程四矩阵 CI 首轮红灯的根因已修复，等待推送后复跑并回填本报告的 run URL、SHA、4/4 job 与全部 step 结果。
