@@ -2028,3 +2028,16 @@ table.admin-table td p { margin: 0.15rem 0; }
     background: var(--paper);
     line-height: 1.9;
 }
+
+/* 版本号印记：页脚品牌旁的低调徽标 */
+.site-footer__version {
+    display: inline-block;
+    margin-left: 0.55rem;
+    padding: 0.08rem 0.4rem;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    font-size: 0.72rem;
+    color: var(--muted);
+    vertical-align: middle;
+    letter-spacing: 0.02em;
+}

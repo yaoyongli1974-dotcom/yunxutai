@@ -3343,6 +3343,12 @@ test('Round2 J：档案版本事务与删除状态机', function (): void {
     }
 });
 
+test('页脚显示版本号印记', function (): void {
+    $home = http('GET', '/');
+    check_contains($home['body'], 'site-footer__version');
+    check_contains($home['body'], 'v2.0.0');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

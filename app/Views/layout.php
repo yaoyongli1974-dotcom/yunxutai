@@ -97,7 +97,7 @@ $canonicalUrl = $canonical ?? ($isNoindex ? null : canonical_url());
         <div>
             <p class="site-footer__brand"><span class="seal seal--small" aria-hidden="true">思</span><?= e((string) config('app.name')) ?></p>
             <p class="muted small"><?= e((string) config('app.tagline')) ?></p>
-        </div>
+         <span class="site-footer__version">v<?= e(ltrim((string) config('app.version'), 'v')) ?></span></div>
         <nav aria-label="页脚导航">
             <a href="<?= e(url('/about')) ?>">关于</a>
             <a href="<?= e(url('/privacy')) ?>">隐私与数据保护</a>
