@@ -1,4 +1,4 @@
-const api = require('../../../utils/api');
+const api = require('../../utils/api');
 Page({
   data: { familyId: 0, family: {}, persons: [], events: [] },
   onLoad(q) { this.setData({ familyId: Number(q.id || 0) }); },

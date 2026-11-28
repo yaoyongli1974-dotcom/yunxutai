@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Api;
 
 use App\Core\ApiAuth;
+use App\Core\Audit;
 use App\Core\Db;
 use Throwable;
 
@@ -45,6 +46,9 @@ final class WechatLogin
         }
 
         $token = ApiAuth::createToken($user, 'miniapp-wechat');
+        Audit::log('auth.wechat_login', 'user', $userId, [
+            'provider' => 'miniapp',
+        ], $userId);
 
         return [
             'token' => (string) $token['token'],

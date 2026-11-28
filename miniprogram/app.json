@@ -10,6 +10,12 @@
     "pages/account/account",
     "pages/families/list",
     "pages/families/detail",
+    "pages/persons/list",
+    "pages/genealogy/index",
+    "pages/timeline/list",
+    "pages/exhibitions/list",
+    "pages/ai/workflow",
+    "pages/invitations/accept",
     "pages/archives/list",
     "pages/notifications/list"
   ],

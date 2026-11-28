@@ -137,15 +137,15 @@ final class FamilyV2Controller extends BaseController
             throw ApiException::notFound('家族不存在');
         }
         $rows = \App\Core\Db::fetchAll(
-            'SELECT id, family_id, name, gender, birth_date, death_date, birth_place, privacy, verification_status
+            'SELECT id, family_id, name, gender, birth_date, death_date, birth_place, privacy,
+                    verification_status, is_deceased
              FROM family_persons WHERE family_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 200',
             [$familyId]
         );
         $items = [];
-        foreach ($rows as $row) {
-            if (FamilyPersonService::getVisible($user, (int) $row['id']) !== null) {
-                $items[] = $row;
-            }
+        foreach (FamilyPersonService::visibleRows($user, $rows) as $row) {
+            unset($row['is_deceased']); // 仅用于过滤，不改动 API 字段契约
+            $items[] = $row;
         }
         return Api::ok(['items' => $items]);
     }

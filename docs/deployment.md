@@ -202,7 +202,7 @@ tar xzf "$B/verifications.tar.gz" -C storage
 
 - [ ] `APP_DEBUG=false`，错误不显示堆栈。
 - [ ] `APP_KEY` 随机且未提交到版本库。
-- [ ] HTTPS 全站，HTTP 跳转，HSTS。
+- [ ] HTTPS 全站，HTTP 跳转，HSTS；边缘补发的 CSP 与应用值一致且不重复（仅绕过 PHP 的静态响应），HTTPS 下会话 Cookie 带 `Secure`。
 - [ ] Web 根目录仅 `public/`；`storage/` 不可 URL 直达。
 - [ ] 数据库最小权限、强密码、仅内网访问。
 - [ ] 上传限制与 MIME 校验生效（尝试上传 `.php` 应被拒绝）。

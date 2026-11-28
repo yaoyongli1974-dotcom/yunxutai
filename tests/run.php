@@ -3631,6 +3631,84 @@ test('C4：归档审批入队，worker 幂等清理且不动共享文件', funct
     @unlink($tmp);
 });
 
+echo "\n[Phase D：配置与审计]\n";
+
+test('D：审计元信息脱敏（邮箱/密码/证件号）', function (): void {
+    $email = 'd-audit-' . getmypid() . '@example.com';
+    \App\Core\Audit::log('d.meta.redaction', 'user', 1, [
+        'email' => $email,
+        'password' => 'PlainSecret' . getmypid(),
+        'token' => 'secret-token-value',
+        'id_number' => '110101199001011234',
+        'note' => "第一行\n第二行",
+    ], 1);
+    $row = Db::fetch("SELECT meta FROM audit_logs WHERE action = 'd.meta.redaction' ORDER BY id DESC LIMIT 1");
+    check($row !== null, '审计记录未写入');
+    $raw = (string) $row['meta'];
+    $meta = json_decode($raw, true);
+    check(is_array($meta), '审计 meta 不是合法 JSON');
+    check(str_contains((string) ($meta['email'] ?? ''), '***@example.com'), '邮箱未脱敏');
+    check(!str_contains($raw, 'PlainSecret'), '密码原文不应写入审计');
+    check(!str_contains($raw, 'secret-token-value'), 'Token 原文不应写入审计');
+    check(!str_contains($raw, '110101199001011234'), '证件号不应写入审计');
+    check(($meta['password'] ?? '') === '[redacted]', '敏感键应标记为已脱敏');
+});
+
+test('D：API 令牌签发写入带 actor 的审计', function (): void {
+    $login = api('POST', '/api/v1/auth/token', ['email' => 'demo@example.com', 'password' => 'Demo@123456']);
+    check($login['status'] === 200, 'API 登录应成功');
+    check(
+        db_count('audit_logs', "action = 'auth.api_token_create' AND actor_user_id IS NOT NULL") >= 1,
+        'API 令牌签发审计缺失 actor_user_id'
+    );
+});
+
+test('D：生产环境开启 APP_DEBUG 时配置 fail-closed', function (): void {
+    $script = sys_get_temp_dir() . '/yxt-debug-check-' . getmypid() . '.php';
+    file_put_contents($script, '<?php define("BASE_PATH", ' . var_export(BASE_PATH, true) . '); require BASE_PATH . "/app/bootstrap.php";');
+    $command = 'APP_ENV=production APP_DEBUG=true php ' . escapeshellarg($script) . ' 2>&1';
+    $output = [];
+    $rc = 0;
+    exec($command, $output, $rc);
+    @unlink($script);
+    check($rc !== 0, '生产环境 APP_DEBUG=true 必须拒绝启动');
+    check(str_contains(implode("\n", $output), 'APP_DEBUG'), '错误信息应说明 APP_DEBUG');
+});
+
+echo "\n[Phase D：小程序页面]\n";
+
+test('D：小程序新增页面已注册且四件套齐全', function (): void {
+    $config = json_decode((string) file_get_contents(BASE_PATH . '/miniprogram/app.json'), true);
+    $pages = (array) ($config['pages'] ?? []);
+    $required = [
+        'pages/persons/list',
+        'pages/genealogy/index',
+        'pages/timeline/list',
+        'pages/exhibitions/list',
+        'pages/ai/workflow',
+        'pages/invitations/accept',
+    ];
+    foreach ($required as $page) {
+        check(in_array($page, $pages, true), '小程序未注册页面 ' . $page);
+        foreach (['js', 'json', 'wxml', 'wxss'] as $ext) {
+            check(is_file(BASE_PATH . '/miniprogram/' . $page . '.' . $ext), '缺少页面文件 ' . $page . '.' . $ext);
+        }
+    }
+});
+
+echo "\n[Phase D：性能索引]\n";
+
+test('D：性能索引迁移已应用', function (): void {
+    check(
+        db_count('schema_migrations', "version = '20261128_005' AND status = 'applied'") === 1,
+        '性能索引迁移 20261128_005 未应用'
+    );
+    $personIndex = Db::fetchAll("SHOW INDEX FROM family_persons WHERE Key_name = 'idx_person_family_deleted_id'");
+    check(count($personIndex) >= 1, 'family_persons 组合索引缺失');
+    $relationIndex = Db::fetchAll("SHOW INDEX FROM person_relationships WHERE Key_name = 'idx_rel_family_id'");
+    check(count($relationIndex) >= 1, 'person_relationships 组合索引缺失');
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

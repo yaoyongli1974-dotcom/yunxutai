@@ -130,3 +130,18 @@
 | N-08/N-09 | 部分修复：事实来源字段已补；自由文本上限与公开草稿可见性待定 | 残余风险 | `20_AI_WORKFLOW_REPORT.md` §4 |
 
 **Phase C 结论**：R-04（用户选定队列异步清理）、R-05~R-09、R-14、R-15、R-17（完整性）、R-24 已关闭；R-10、R-11（超时）、R-16（细粒度）、R-18、R-20、R-21、R-23、R-25/R-26 等进入 D/E。全量 138/0；未 push main、未发版、未动生产。
+
+## 6. Phase D 处置结果（2026-11-28）
+
+| ID | 处置 | 结果 | 证据 |
+|---|---|---|---|
+| R-25/R-26 | 已修复：APP_DEBUG 默认 false + production fail-closed；Audit 元信息脱敏；API 令牌/微信登录审计带 actor；服务层敏感 meta 改哈希/字段名 | PASS | `D：审计脱敏…`、`D：production+debug fail-closed`、`D：API 令牌签发审计 actor` |
+| R-27 | 已修复：媒体/档案批量上传队列 + 逐文件进度/失败重试 | PASS（代码） | `30_USER_EXPERIENCE_REPORT.md`；`batch-upload.js` |
+| R-28 | 已修复：Dashboard 五步非阻断引导 + localStorage 跳过/恢复 | PASS | `30_USER_EXPERIENCE_REPORT.md`；`app.js` |
+| R-29 | 已修复（用户决策「补页面」）：小程序新增 6 页（人物/谱系/时间线/展览/AI/邀请接受），入口与 require 路径同步修正；401 静默续登接入 | PASS（代码+node --check） | `31_MINIPROGRAM_REPORT.md`；`app.json` |
+| R-30 | 部分修复：nginx CSP 以注释示例加入部署模板，应用层 CSP 未改；生产边缘配置需运维启用 | 残余风险 | `33_DEPLOYMENT_CHECKLIST.md` |
+| P-01~P-06 | 已修复：人物/关系/档案列表 N+1 与无界查询；批量可见性过滤 + LIMIT；索引迁移 005 | PASS（`EXPLAIN`） | `32_PERFORMANCE_REPORT.md`；`D：性能索引迁移已应用` |
+| N-07 | 仍为残余风险：签名绑定可见性 + TTL 300s + no-store，但无 per-user 绑定 | OPEN | `12_MEDIA_SECURITY_REPORT.md` §4 |
+| R-10/R-11/R-16/R-18/R-20/R-21/R-23 | 未修复，保留至 Phase E | OPEN | `20_AI_WORKFLOW_REPORT.md`、`23_DATABASE_REPORT.md` |
+
+**Phase D 结论**：用户两项决策已执行（补页面、接受 APP_DEBUG 默认关闭）。全量 143/0；32 个迁移版本全 applied；PHP lint / PHPStan / secret-scan / JS check / doctor / `git diff --check` 均 rc=0。未 push main、未发版、未动生产。真机走查、大规模性能数据集、服务端精确引导进度、边缘 CSP 启用列为 E/运维项。

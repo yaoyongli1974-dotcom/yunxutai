@@ -218,8 +218,8 @@ final class AiWorkflowService
                 }
                 continue;
             }
-            $retry = min((int) $row['retry_count'] + 1, (int) Db::value('SELECT max_retries FROM ai_workflows WHERE id = ?', [$id]));
             $max = (int) Db::value('SELECT max_retries FROM ai_workflows WHERE id = ?', [$id]);
+            $retry = min((int) $row['retry_count'] + 1, $max);
             $ok = Db::update('ai_workflows', [
                 'status' => $retry < $max ? 'queued' : 'failed',
                 'failure_class' => 'lease_expired',
@@ -374,7 +374,7 @@ final class AiWorkflowService
                 [$id, $workerId, $lockVersion]);
             Db::update('ai_workflows', ['last_error_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
             Audit::log('ai.workflow.failed', 'ai_workflow', $id, [
-                'class' => $class, 'retry' => $retry, 'error' => mb_substr($e->getMessage(), 0, 120),
+                'class' => $class, 'retry' => $retry, 'error_hash' => hash('sha256', $e->getMessage()),
             ]);
             throw $e;
         }

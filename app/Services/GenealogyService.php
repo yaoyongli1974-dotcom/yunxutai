@@ -169,7 +169,7 @@ final class GenealogyService
              JOIN family_persons pa ON pa.id = r.person_a_id
              JOIN family_persons pb ON pb.id = r.person_b_id
              WHERE r.family_id = ? AND pa.deleted_at IS NULL AND pb.deleted_at IS NULL
-             ORDER BY r.id',
+             ORDER BY r.id LIMIT 500',
             [$familyId]
         );
         $role = Policy::familyRole($familyId, isset($user['id']) ? (int) $user['id'] : null);
@@ -341,9 +341,11 @@ final class GenealogyService
                 [$duplicateId, $familyId]
             );
         });
+        // 姓名属于个人信息：只保留摘要哈希，审计仍可关联到具体人物 ID。
         Audit::log('person.merge', 'person', $primaryId, [
             'family_id' => $familyId, 'duplicate_id' => $duplicateId,
-            'duplicate_name' => $duplicate['name'], 'primary_name' => $primary['name'],
+            'duplicate_name_hash' => hash('sha256', (string) $duplicate['name']),
+            'primary_name_hash' => hash('sha256', (string) $primary['name']),
         ], (int) $user['id']);
         Policy::clearCache();
     }

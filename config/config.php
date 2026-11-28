@@ -15,6 +15,12 @@ if ($appKey === '' || $appKey === 'dev-only-key-change-before-production') {
     $appKey = 'dev-only-key-change-before-production';
 }
 
+// 调试模式默认关闭：本地/测试可显式开启；生产环境开启会泄露堆栈与内部信息，直接拒绝启动。
+$appDebug = filter_var(getenv('APP_DEBUG') ?: 'false', FILTER_VALIDATE_BOOL);
+if ($appEnv === 'production' && $appDebug) {
+    throw new RuntimeException('生产环境禁止开启 APP_DEBUG（调试模式）；请将 APP_DEBUG 设为 false 后再启动。');
+}
+
 return [
     'app' => [
         'name'        => getenv('APP_NAME') ?: '云叙台',
@@ -22,7 +28,7 @@ return [
         'tagline'     => '记取来时路，安放未尽言',
         'url'         => rtrim((string) (getenv('APP_URL') ?: ''), '/'),
         'env'         => $appEnv,
-        'debug'       => filter_var(getenv('APP_DEBUG') ?: 'true', FILTER_VALIDATE_BOOL),
+        'debug'       => $appDebug,
         'timezone'    => getenv('APP_TIMEZONE') ?: 'Asia/Shanghai',
         'key'         => $appKey,
         // 仅可信反向代理后的 X-Forwarded-Proto 才用于判定 cookie secure。

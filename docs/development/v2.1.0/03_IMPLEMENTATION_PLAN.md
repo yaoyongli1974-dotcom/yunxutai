@@ -113,4 +113,18 @@
 - 阶段报告：`20_AI_WORKFLOW_REPORT.md`、`21_DATA_CONSISTENCY_REPORT.md`、`22_DATA_GOVERNANCE_REPORT.md`、`23_DATABASE_REPORT.md`、`24_AUDIT_REPORT.md`、`04_DATA_RETENTION_POLICY.md`、`05_BACKUP_RECOVERY_REPORT.md`；风险登记册 §5 已更新。
 - 门禁：Phase C 已关闭风险已记录，剩余项进入 Phase D/E；未 push main，未发版，未动生产。
 
-**下一步**：等待人工批准进入 Phase D（P2 用户体验、小程序、性能、部署安全），并确认版本最终定为 v2.1.0 或 v2.0.2（可在 Phase E 决定）。
+**下一步（已过期）**：等待人工批准进入 Phase D（P2 用户体验、小程序、性能、部署安全），并确认版本最终定为 v2.1.0 或 v2.0.2（可在 Phase E 决定）。
+
+---
+
+## Phase D 执行记录（已完成）
+
+- 人工决策（verbatim 要点）：「1.补页面，2.接受」——补齐小程序缺失页面；接受 APP_DEBUG 默认 false。
+- 四路互不重叠写作用域：D1 小程序页面（6 新页 × 四件套 + api.js/app.js）、D2 Web UX（引导 + 批量上传）、D3 配置/审计脱敏（APP_DEBUG + Audit sanitize + API actor）、D4 性能（批量可见性过滤 + LIMIT + 索引）；测试统一接入 `tests/run.php`。
+- 新增迁移：`20261128_005_performance_indexes.php`；累计 32 版本全部 applied，重复执行 rc=0。
+- 集成修正：4 个旧小程序页面 require 路径、families 详情/列表导航入口、Phase D 五项测试。
+- 回归：PHP lint rc=0；node --check rc=0；composer validate --strict rc=0；PHPStan `[OK] No errors` rc=0；secret-scan rc=0；`bash bin/test.sh` **143 通过 / 0 失败**；doctor rc=0（0 阻断，3 警告）；`git diff --check` rc=0。`EXPLAIN` 日志 `/tmp/opencode/phase-d/explain.log` 确认索引生效。
+- 阶段报告：`30_USER_EXPERIENCE_REPORT.md`、`31_MINIPROGRAM_REPORT.md`、`32_PERFORMANCE_REPORT.md`、`33_DEPLOYMENT_CHECKLIST.md`；风险登记册 §6 已更新。
+- 门禁：Phase D 已关闭 R-25/R-26/R-27/R-28/R-29 及性能 P-01~P-06；剩余项进入 Phase E；未 push main，未发版，未动生产。
+
+**下一步**：等待人工批准进入 Phase E（最终回归、备份恢复复验、发布准备），并确认版本最终定为 v2.1.0 或 v2.0.2。

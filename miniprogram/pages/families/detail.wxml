@@ -1,9 +1,12 @@
 <view class="page">
   <view class="head"><text class="title">{{family.name || '家族'}}</text><text class="sub">{{family.description || '暂无简介'}}</text></view>
   <view class="grid">
+    <view class="entry" data-url="/pages/persons/list?id={{familyId}}" bindtap="onNav"><text>家族人物</text><text class="arrow">›</text></view>
     <view class="entry" data-url="/pages/archives/list?familyId={{familyId}}" bindtap="onNav"><text>数字档案</text><text class="arrow">›</text></view>
-    <view class="entry" bindtap="onGenealogy"><text>家族谱系</text><text class="arrow">›</text></view>
-    <view class="entry" bindtap="onWorkflow"><text>AI 工坊</text><text class="arrow">›</text></view>
+    <view class="entry" data-url="/pages/genealogy/index?id={{familyId}}" bindtap="onNav"><text>家族谱系</text><text class="arrow">›</text></view>
+    <view class="entry" data-url="/pages/timeline/list?id={{familyId}}" bindtap="onNav"><text>家族时间线</text><text class="arrow">›</text></view>
+    <view class="entry" data-url="/pages/exhibitions/list?id={{familyId}}" bindtap="onNav"><text>数字展览</text><text class="arrow">›</text></view>
+    <view class="entry" data-url="/pages/ai/workflow?id={{familyId}}" bindtap="onNav"><text>AI 工坊</text><text class="arrow">›</text></view>
   </view>
   <view class="section-title">家族人物（{{persons.length}}）</view>
   <view class="empty" wx:if="{{!persons.length}}">还没有人物档案。</view>

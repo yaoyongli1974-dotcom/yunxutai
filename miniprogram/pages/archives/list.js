@@ -1,4 +1,4 @@
-const api = require('../../../utils/api');
+const api = require('../../utils/api');
 Page({
   data: { familyId: 0, familyName: '', archives: [], loading: true, showForm: false, title: '', archiveType: 'document' },
   onLoad(q) {

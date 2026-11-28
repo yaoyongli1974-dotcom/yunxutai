@@ -29,6 +29,27 @@
             });
         });
 
+        // 新手引导：跳过状态仅存在浏览器本地，不影响账号/数据逻辑
+        document.querySelectorAll('[data-onboarding][data-onboarding-key]').forEach(function (panel) {
+            var key = panel.getAttribute('data-onboarding-key') || '';
+            try {
+                if (key && window.localStorage.getItem(key) === '1') {
+                    panel.hidden = true;
+                }
+            } catch (e) { /* 隐私模式下忽略 */ }
+        });
+        document.querySelectorAll('[data-onboarding-dismiss]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                var panel = button.closest('[data-onboarding]');
+                if (!panel) { return; }
+                panel.hidden = true;
+                var key = panel.getAttribute('data-onboarding-key') || '';
+                if (key) {
+                    try { window.localStorage.setItem(key, '1'); } catch (e) { /* 忽略 */ }
+                }
+            });
+        });
+
         // 复制链接
         document.querySelectorAll('[data-copy]').forEach(function (button) {
             button.addEventListener('click', function () {

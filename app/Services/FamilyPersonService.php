@@ -64,6 +64,86 @@ final class FamilyPersonService
         return Db::fetch('SELECT * FROM family_persons WHERE id = ? AND deleted_at IS NULL LIMIT 1', [$id]);
     }
 
+    /**
+     * 批量过滤已取出的人物行：一次家族查询 + 缓存的 familyRole，逐行复用
+     * Policy::canViewResource('person') 的完全相同的可见性规则，保持输入顺序。
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    public static function visibleRows(?array $user, array $rows): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+        $userId = isset($user['id']) ? (int) $user['id'] : null;
+
+        $familyIds = [];
+        foreach ($rows as $row) {
+            $familyId = (int) ($row['family_id'] ?? 0);
+            if ($familyId > 0) {
+                $familyIds[$familyId] = $familyId;
+            }
+        }
+        $families = [];
+        if ($familyIds !== []) {
+            $placeholders = implode(',', array_fill(0, count($familyIds), '?'));
+            foreach (Db::fetchAll(
+                "SELECT id, privacy, status FROM families WHERE id IN ({$placeholders}) AND status = ?",
+                [...array_values($familyIds), 'active']
+            ) as $family) {
+                $families[(int) $family['id']] = $family;
+            }
+        }
+        $roles = [];
+        foreach ($familyIds as $familyId) {
+            $roles[$familyId] = Policy::familyRole($familyId, $userId);
+        }
+
+        $visible = [];
+        foreach ($rows as $row) {
+            if (self::rowVisible($row, $families, $roles)) {
+                $visible[] = $row;
+            }
+        }
+        return $visible;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param array<int,array<string,mixed>> $families
+     * @param array<int,string|null> $roles
+     */
+    private static function rowVisible(array $row, array $families, array $roles): bool
+    {
+        $familyId = (int) ($row['family_id'] ?? 0);
+        $family = $families[$familyId] ?? null;
+        if ($family === null) {
+            return false;
+        }
+        $role = $roles[$familyId] ?? null;
+        // 家族必须可见：成员或公开家族；unlisted/private 仅成员可见。
+        if ($role === null && ($family['privacy'] ?? '') !== 'public') {
+            return false;
+        }
+        $verification = (string) ($row['verification_status'] ?? 'none');
+        // 活人/争议资料与私密人物仅家族管理员可见，规则与 Policy 人物分支一致。
+        if ($verification === 'disputed') {
+            return in_array($role, ['owner', 'admin'], true);
+        }
+        if ((int) ($row['is_deceased'] ?? 0) === 0) {
+            return in_array($role, ['owner', 'admin', 'genealogy_editor'], true);
+        }
+        $privacy = (string) ($row['privacy'] ?? 'private');
+        if ($privacy === 'private') {
+            return in_array($role, ['owner', 'admin', 'genealogy_editor'], true);
+        }
+        if ($privacy === 'family') {
+            return $role !== null;
+        }
+        return $privacy === 'public' && $verification === 'verified';
+    }
+
     /** @param array<string,mixed> $user */
     public static function update(array $user, int $familyId, int $personId, array $data): void
     {
