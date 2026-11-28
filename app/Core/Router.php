@@ -96,12 +96,12 @@ final class Router
             // API 认证只接受 Bearer Token，绝不使用 Web Session 回退；失败统一 JSON，不跳转 HTML。
             'api-auth' => ApiAuth::resolve() !== null
                 ? null
-                : Response::json(['error' => ['code' => 'unauthorized', 'message' => '请先登录']], 401),
+                : \App\Api\Api::error('unauthorized', '请先登录', 401),
             'api-admin' => ApiAuth::resolve() !== null
                 ? (Auth::isAdmin()
                     ? null
-                    : Response::json(['error' => ['code' => 'forbidden', 'message' => '没有访问权限']], 403))
-                : Response::json(['error' => ['code' => 'unauthorized', 'message' => '请先登录']], 401),
+                    : \App\Api\Api::error('forbidden', '没有访问权限', 403))
+                : \App\Api\Api::error('unauthorized', '请先登录', 401),
             default => throw new \RuntimeException('Unknown middleware: ' . $name),
         };
     }

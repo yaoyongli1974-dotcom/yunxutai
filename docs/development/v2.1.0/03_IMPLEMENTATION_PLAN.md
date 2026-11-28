@@ -99,3 +99,18 @@
 - 回归：PHP lint / composer validate / PHPStan / secret-scan / JS check / migration status+repeat / doctor / `git diff --check` 均 rc=0；`bash bin/test.sh` 133 通过 / 0 失败（原 128 + 新增 5）。
 - 阶段报告：`10_SECURITY_FIX_REPORT.md`、`11_AUTHORIZATION_TEST_REPORT.md`、`12_MEDIA_SECURITY_REPORT.md`；风险登记册已追加 Phase B 处置结果。
 - 门禁：Phase B 全部通过，进入 Phase C；未 push main，未发 Release，未动生产。
+
+---
+
+## Phase C 执行记录（已完成）
+
+- 人工决策：批准进入 Phase C；R-04 采用**队列异步清理**（先标记待清理、独立幂等任务清理，以便回滚）；AI 事实来源按任务书**完整新增一套字段**。
+- 五路互不重叠写作用域：C1 DB/doctor、C2 AI 可靠性+事实来源、C3 归档异步清理、C4 请求追踪、C5 备份恢复校验；测试由主会话统一接入 `tests/run.php`。
+- 新增迁移：`20261128_002_ai_fact_provenance.php`、`20261128_003_archive_cleanup_queue.php`、`20261128_004_audit_request_id.php`；累计 31 版本全部 applied，重复执行 rc=0。
+- 关键修正：`database/schema.sql` 不再重复写由迁移管理的列；`bin/install.php` 安装后自动执行 `migrate-v2.php`，修复全新安装 + 027 ALTER 重复列失败；`Router` 的 API 401/403 改用 `Api::error()` 以携带 request_id。
+- 回归：PHP lint rc=0；composer validate --strict rc=0；PHPStan `[OK] No errors` rc=0；secret-scan rc=0；node --check rc=0；`bash bin/test.sh` **138 通过 / 0 失败**（原 133 + Phase C 5 项）；doctor rc=0（0 阻断）；`git diff --check` rc=0。
+- 恢复演练：`bin/backup.php` rc=0；`restore-check` rc=0（3 产物 sha256/bytes OK，tables=57 inserts=53）；隔离库 `jidian_restore` 导入 + Doctor rc=0 + 行数核对完成，演练库已删除。
+- 阶段报告：`20_AI_WORKFLOW_REPORT.md`、`21_DATA_CONSISTENCY_REPORT.md`、`22_DATA_GOVERNANCE_REPORT.md`、`23_DATABASE_REPORT.md`、`24_AUDIT_REPORT.md`、`04_DATA_RETENTION_POLICY.md`、`05_BACKUP_RECOVERY_REPORT.md`；风险登记册 §5 已更新。
+- 门禁：Phase C 已关闭风险已记录，剩余项进入 Phase D/E；未 push main，未发版，未动生产。
+
+**下一步**：等待人工批准进入 Phase D（P2 用户体验、小程序、性能、部署安全），并确认版本最终定为 v2.1.0 或 v2.0.2（可在 Phase E 决定）。

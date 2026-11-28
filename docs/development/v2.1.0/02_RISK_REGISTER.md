@@ -108,3 +108,25 @@
 | R-25/R-26 | 未修复，按计划进入 Phase D | OPEN | — |
 
 **Phase B 结论**：P0 全部关闭；P1 的 R-12/R-13 提前关闭。无测试删除、无门禁降级。
+
+## 5. Phase C 处置结果（2026-11-28）
+
+| ID | 处置 | 结果 | 证据 |
+|---|---|---|---|
+| R-04 | 已修复：先标记 deleted + 入队，独立幂等 worker 异步清理；共享文件保护；可回滚 | PASS | `22_DATA_GOVERNANCE_REPORT.md`；`C4` 归档清理测试 |
+| R-05 | 已修复：schema.sql 不重复写迁移管理列；`install.php` 安装后自动跑 migrate-v2；doctor 检查迁移状态 | PASS | `23_DATABASE_REPORT.md`；全新安装 + 31 版本 applied |
+| R-06/R-07 | 已修复：owns() 加租约判断；process 全路径 fencing；取消后旧 token 不可写回 | PASS | `C2` fencing 测试；全量 138/0 |
+| R-08 | 已修复：create() 捕获 23000 回查既有 id | PASS | 全量 138/0 |
+| R-09 | 已修复：订单确认事务 + FOR UPDATE + 条件状态校验 | PASS（代码+串行测试） | 并发 10 路专项列 E |
+| R-11 | 部分修复：ProcessingException 分类与不可重试语义已生效；内部总超时未实现 | 残余风险 | `20_AI_WORKFLOW_REPORT.md` §4 |
+| R-10 | 未修复：步骤仍批量置位，不反映真实执行进度 | OPEN（列 E） | `20_AI_WORKFLOW_REPORT.md` §4 |
+| R-14 | 已修复：restore-check 校验全部产物 sha256/bytes + SQL 行数；完成隔离恢复演练 | PASS | `05_BACKUP_RECOVERY_REPORT.md` |
+| R-15 | 已修复：doctor 必需表 9→21，新增迁移状态检查 | PASS | doctor rc=0，0 阻断 |
+| R-16 | 部分修复：测试扩展到全部 20261128 版本与迁移状态 | 残余风险 | `23_DATABASE_REPORT.md` §5 |
+| R-17 | 已修复：manifest 加 sha256/bytes；加密/异地仍 OPEN | PASS（完整性）/OPEN（加密） | `05_BACKUP_RECOVERY_REPORT.md` |
+| R-18/R-20/R-21 | 未修复，列 D/E | OPEN | 本阶段最小改动原则未触碰 |
+| R-23 | 未修复：AI 完成通知未 emit | OPEN（列 E） | `20_AI_WORKFLOW_REPORT.md` §4 |
+| R-24 | 已修复：X-Request-Id / 顶层 request_id / 审计字段 / API 中间件信封 | PASS | `24_AUDIT_REPORT.md`；`C4` 测试 |
+| N-08/N-09 | 部分修复：事实来源字段已补；自由文本上限与公开草稿可见性待定 | 残余风险 | `20_AI_WORKFLOW_REPORT.md` §4 |
+
+**Phase C 结论**：R-04（用户选定队列异步清理）、R-05~R-09、R-14、R-15、R-17（完整性）、R-24 已关闭；R-10、R-11（超时）、R-16（细粒度）、R-18、R-20、R-21、R-23、R-25/R-26 等进入 D/E。全量 138/0；未 push main、未发版、未动生产。

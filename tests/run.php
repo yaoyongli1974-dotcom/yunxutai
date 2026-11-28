@@ -3495,6 +3495,142 @@ test('B-R03：撤回授权后 AI 任务不再执行，失败任务不复活', fu
     );
 });
 
+echo "\n[Phase C：数据库结构与请求追踪]\n";
+
+test('C1：迁移列与元数据表结构完整', function (): void {
+    $expectedColumns = [
+        ['ai_workflows', 'lock_version'],
+        ['ai_workflows', 'heartbeat_at'],
+        ['ai_workflows', 'last_error_at'],
+        ['memory_facts', 'source_archive_id'],
+        ['memory_facts', 'source_excerpt'],
+        ['memory_facts', 'subject_type'],
+        ['audit_logs', 'request_id'],
+    ];
+    foreach ($expectedColumns as [$table, $column]) {
+        $found = (int) Db::value(
+            'SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?',
+            [$table, $column]
+        );
+        check($found === 1, '缺少列 ' . $table . '.' . $column);
+    }
+    check(db_count('archive_cleanup_queue') >= 0, '归档清理队列表不可查询');
+    $versions = Db::fetchAll("SELECT version FROM schema_migrations WHERE version LIKE '20261128_%'");
+    $found = array_column($versions, 'version');
+    foreach (['20261128_001', '20261128_002', '20261128_003', '20261128_004'] as $version) {
+        check(in_array($version, $found, true), '缺少迁移版本 ' . $version);
+    }
+    check(db_count('schema_migrations', "status <> 'applied'") === 0, '存在未应用的迁移');
+});
+
+test('C4：Web/API 响应携带 request_id，审计记录可关联', function (): void {
+    $page = http('GET', '/', null, [], false);
+    check($page['status'] === 200, '首页应可访问');
+    check(preg_match('/X-Request-Id:\s*([A-Za-z0-9_-]{1,32})/i', $page['headers'], $m) === 1, '缺少 X-Request-Id 响应头');
+    check(strlen($m[1]) === 32 || ctype_alnum($m[1]), '请求 ID 格式不合法');
+
+    $unauth = api('GET', '/api/v1/me');
+    check($unauth['status'] === 401, '未登录访问 /me 应 401');
+    check(isset($unauth['data']['request_id']), 'API 错误缺少 request_id');
+    check(is_string($unauth['data']['request_id']), 'request_id 应为字符串');
+
+    $owner = make_family_user('c-request-audit');
+    \App\Services\FamilyService::create($owner, '请求追踪家族', 'c-req-' . bin2hex(random_bytes(3)));
+    check(
+        db_count('audit_logs', "action = 'family.create' AND request_id IS NOT NULL AND request_id <> ''") >= 1,
+        '审计日志未写入 request_id'
+    );
+});
+
+echo "\n[Phase C：AI 可靠性与事实来源]\n";
+
+test('C2：取消工作流后旧 fencing token 无法写回结果', function (): void {
+    $owner = make_family_user('c-fence');
+    $familyId = \App\Services\FamilyService::create($owner, '围栏家族', 'c-fence-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1990年3月，父亲从北方迁往南方。',
+    ], 'c-fence-key');
+    $claimed = \App\Services\AiWorkflowService::claimStrict('c-worker-a', 50);
+    $token = null;
+    foreach ($claimed as $row) {
+        if ((int) $row['id'] === $id) {
+            $token = (int) $row['lock_version'];
+            break;
+        }
+    }
+    check($token !== null, '测试任务未被领取');
+    \App\Services\AiWorkflowService::cancel($owner, $id);
+    try {
+        \App\Services\AiWorkflowService::process($id, 'c-worker-a', $token);
+        check(false, '旧 Worker 不应能写回已取消任务');
+    } catch (RuntimeException $e) {
+        check(str_contains($e->getMessage(), '持有权') || str_contains($e->getMessage(), '不可执行'), '拒绝原因不符');
+    }
+    check((string) Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) === 'cancelled', '任务状态应保持 cancelled');
+});
+
+test('C2：AI 事实候选记录完整来源与主体字段', function (): void {
+    $owner = make_family_user('c-fact');
+    $familyId = \App\Services\FamilyService::create($owner, '事实来源家族', 'c-fact-' . bin2hex(random_bytes(3)));
+    $personId = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '来源人物', 'is_deceased' => true]);
+    $factId = \App\Services\AiWorkflowService::addFactCandidate(
+        $owner, $familyId, 'date', '1990年3月迁往南方', 'ai_extraction',
+        null, $personId, 0.75, '原文：1990年3月迁往南方', 101, 202, 'person', $personId
+    );
+    $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
+    check($fact !== null, '事实未入库');
+    check((string) $fact['source_excerpt'] === '原文：1990年3月迁往南方', '来源摘录未写入');
+    check((int) $fact['source_archive_id'] === 101 && (int) $fact['source_version_id'] === 202, '来源档案/版本未写入');
+    check((string) $fact['subject_type'] === 'person' && (int) $fact['subject_id'] === $personId, '主体字段未写入');
+    check((string) $fact['verification_status'] === 'pending', 'AI 事实不得自动确认');
+});
+
+echo "\n[Phase C：归档异步清理]\n";
+
+test('C4：归档审批入队，worker 幂等清理且不动共享文件', function (): void {
+    $owner = make_family_user('c-cleanup');
+    $familyId = \App\Services\FamilyService::create($owner, '清理家族', 'c-cleanup-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '待清理档案', 'privacy' => 'private']);
+    $tmp = sys_get_temp_dir() . '/c-cleanup-' . bin2hex(random_bytes(4)) . '.png';
+    $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', true);
+    check(is_string($png), '测试 PNG 解码失败');
+    file_put_contents($tmp, $png);
+
+    login((string) $owner['email'], 'FamilyTest@123');
+    $upload = http('POST', '/archives/' . $archiveId . '/files', [
+        '_token' => csrf_token('/archives/' . $archiveId),
+    ], ['file' => $tmp], false);
+    check($upload['status'] === 302, '上传应重定向');
+    $file = Db::fetch('SELECT * FROM archive_files WHERE archive_id = ? LIMIT 1', [$archiveId]);
+    check($file !== null, '缺少档案文件记录');
+    $storageKey = (string) $file['storage_key'];
+    $absolute = \App\Core\Storage::absolute($storageKey);
+    check($absolute !== null && is_file($absolute), '物理文件应存在');
+
+    \App\Services\ArchiveService::requestDelete($owner, $archiveId);
+    \App\Services\ArchiveService::approveDelete($owner, $archiveId, true);
+    check((string) Db::value('SELECT status FROM archives WHERE id = ?', [$archiveId]) === 'deleted', '档案应进入 deleted');
+    check(db_count('archive_cleanup_queue', "archive_id = ? AND status = 'pending'", [$archiveId]) === 1, '应生成一条待清理队列');
+    check(db_count('archive_files', 'archive_id = ?', [$archiveId]) === 1, '审批时不应同步删除文件记录');
+    check(is_file((string) $absolute), '审批时不应同步删除物理文件');
+
+    $command = 'php ' . escapeshellarg(BASE_PATH . '/bin/archive-cleanup.php') . ' --once --limit=10 2>&1';
+    $output = [];
+    $rc = 0;
+    exec($command, $output, $rc);
+    check($rc === 0, '清理 worker 失败：' . implode("\n", $output));
+    check(db_count('archive_cleanup_queue', "archive_id = ? AND status = 'done'", [$archiveId]) === 1, '队列项应完成');
+    check(db_count('archive_files', 'archive_id = ?', [$archiveId]) === 0, '文件记录应被清理');
+    check(!is_file($absolute), '物理文件应被清理');
+
+    $output2 = [];
+    $rc2 = 0;
+    exec($command, $output2, $rc2);
+    check($rc2 === 0, '重复运行 worker 不应失败');
+    check(db_count('archive_cleanup_queue', "archive_id = ? AND status = 'done'", [$archiveId]) === 1, '重复运行不应新增队列项');
+    @unlink($tmp);
+});
+
 echo "\n========== 结果 ==========\n";
 echo "通过：{$passed}，失败：{$failed}\n";
 if ($failed > 0) {

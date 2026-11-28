@@ -22,10 +22,11 @@ final class Audit
                 'target_id' => $targetId,
                 'meta' => $meta === [] ? null : json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 'ip_hash' => Str::ipHash($_SERVER['REMOTE_ADDR'] ?? null),
+                'request_id' => $GLOBALS['request_id'] ?? null,
             ]);
         } catch (\Throwable $e) {
             // 审计失败不应中断用户操作，但必须留在错误日志中。
-            error_log('audit failed: ' . $e->getMessage());
+            error_log('audit failed [request_id=' . ($GLOBALS['request_id'] ?? '-') . ']: ' . $e->getMessage());
         }
     }
 }

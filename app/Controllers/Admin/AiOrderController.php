@@ -6,6 +6,7 @@ namespace App\Controllers\Admin;
 use App\Core\Audit;
 use App\Core\Auth;
 use App\Core\Csrf;
+use App\Core\Db;
 use App\Core\Flash;
 use App\Core\HttpException;
 use App\Core\Request;
@@ -43,63 +44,68 @@ final class AiOrderController
     {
         Csrf::verify($request);
         $this->guard();
-        $order = AiOrder::find((int) $id);
-        if ($order === null) {
-            throw new HttpException(404, '订单不存在');
-        }
-        if ((string) $order['status'] !== 'pending') {
-            Flash::error('只有待确认订单可以确认收款。');
-            return Response::redirect('/admin/ai-orders');
-        }
 
-        $service = AiService::findBySlug((string) $order['service_slug']);
-        if ($service === null || !(bool) $service['enabled']) {
-            Flash::error('该 AI 服务已下架或停用，请先在「AI 服务与价格」恢复开放，或驳回订单。');
-            return Response::redirect('/admin/ai-orders');
-        }
-
-        $input = json_decode((string) $order['input_json'], true);
-        if (!is_array($input) || $input === []) {
-            Flash::error('订单内容缺失，无法生成任务，请驳回并通知用户重新提交。');
-            return Response::redirect('/admin/ai-orders');
-        }
-
-        $paymentRef = mb_substr(trim((string) $request->input('payment_ref', '')), 0, 190);
-        if (mb_strlen($paymentRef) > 190) {
-            $paymentRef = mb_substr($paymentRef, 0, 190);
-        }
-
-        // 确认收款 = 记账后正式生成任务；付费订单不占每日免费额度。
-        $jobId = AiJob::create(
-            (int) $order['memorial_id'],
-            (int) $order['user_id'],
-            (string) $order['service_slug'],
-            $input,
-            (int) $order['price_cents']
-        );
-        if ((bool) config('ai.sync', true)) {
-            try {
-                AiStudioService::process($jobId);
-            } catch (\Throwable $e) {
-                // 任务保留 failed 状态，可在「AI 任务」页重试，不影响订单已确认的事实。
+        // 确认收款全链路加锁：并发确认时只有一个请求能进入待支付分支
+        return Db::transaction(static function () use ($request, $id): Response {
+            $order = AiOrder::find((int) $id);
+            if ($order === null) {
+                throw new HttpException(404, '订单不存在');
             }
-        }
+            $locked = Db::fetch('SELECT status FROM ai_orders WHERE id = ? FOR UPDATE', [$id]);
+            if ($locked === null || (string) $locked['status'] !== 'pending') {
+                Flash::error('只有待确认订单可以确认收款。');
+                return Response::redirect('/admin/ai-orders');
+            }
 
-        AiOrder::update((int) $order['id'], [
-            'status' => 'paid',
-            'task_id' => $jobId,
-            'payment_ref' => $paymentRef,
-            'paid_at' => date('Y-m-d H:i:s'),
-            'reviewed_by' => ($actor = Auth::user()) !== null ? (int) $actor['id'] : null,
-        ]);
-        Audit::log('admin.ai_order_confirmed', 'ai_order', (int) $order['id'], [
-            'service' => (string) $order['service_slug'],
-            'price_cents' => (int) $order['price_cents'],
-            'job_id' => $jobId,
-            'memorial_id' => (int) $order['memorial_id'],
-        ]);
-        Flash::success('订单已确认收款并生成 AI 任务（#' . $jobId . '）。');
-        return Response::redirect('/admin/ai-orders');
+            $service = AiService::findBySlug((string) $order['service_slug']);
+            if ($service === null || !(bool) $service['enabled']) {
+                Flash::error('该 AI 服务已下架或停用，请先在「AI 服务与价格」恢复开放，或驳回订单。');
+                return Response::redirect('/admin/ai-orders');
+            }
+
+            $input = json_decode((string) $order['input_json'], true);
+            if (!is_array($input) || $input === []) {
+                Flash::error('订单内容缺失，无法生成任务，请驳回并通知用户重新提交。');
+                return Response::redirect('/admin/ai-orders');
+            }
+
+            $paymentRef = mb_substr(trim((string) $request->input('payment_ref', '')), 0, 190);
+            if (mb_strlen($paymentRef) > 190) {
+                $paymentRef = mb_substr($paymentRef, 0, 190);
+            }
+
+            // 确认收款 = 记账后正式生成任务；付费订单不占每日免费额度。
+            $jobId = AiJob::create(
+                (int) $order['memorial_id'],
+                (int) $order['user_id'],
+                (string) $order['service_slug'],
+                $input,
+                (int) $order['price_cents']
+            );
+            if ((bool) config('ai.sync', true)) {
+                try {
+                    AiStudioService::process($jobId);
+                } catch (\Throwable $e) {
+                    // 任务保留 failed 状态，可在「AI 任务」页重试，不影响订单已确认的事实。
+                }
+            }
+
+            AiOrder::update((int) $order['id'], [
+                'status' => 'paid',
+                'task_id' => $jobId,
+                'payment_ref' => $paymentRef,
+                'paid_at' => date('Y-m-d H:i:s'),
+                'reviewed_by' => ($actor = Auth::user()) !== null ? (int) $actor['id'] : null,
+            ]);
+            Audit::log('admin.ai_order_confirmed', 'ai_order', (int) $order['id'], [
+                'service' => (string) $order['service_slug'],
+                'price_cents' => (int) $order['price_cents'],
+                'job_id' => $jobId,
+                'memorial_id' => (int) $order['memorial_id'],
+            ]);
+            Flash::success('订单已确认收款并生成 AI 任务（#' . $jobId . '）。');
+            return Response::redirect('/admin/ai-orders');
+        });
     }
 
     public function reject(Request $request, string $id): Response

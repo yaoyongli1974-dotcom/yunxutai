@@ -68,6 +68,11 @@ final class Response
     public function send(): void
     {
         if (!headers_sent()) {
+            // 避免重复发送：仅当响应自身未携带该头且全局存在请求 ID 时补上。
+            $requestId = $GLOBALS['request_id'] ?? null;
+            if ($requestId !== null && !isset($this->headers['X-Request-Id'])) {
+                $this->headers['X-Request-Id'] = $requestId;
+            }
             http_response_code($this->status);
             foreach ($this->headers as $name => $value) {
                 header($name . ': ' . $value);

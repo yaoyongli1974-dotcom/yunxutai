@@ -5,7 +5,8 @@ declare(strict_types=1);
 /**
  * 备份数据库与上传目录。
  * 用法：php bin/backup.php [--keep=14] [--no-uploads]
- * 产物：storage/backups/YYYYmmdd-HHMMSS/{database.sql.gz,uploads.tar.gz}
+ * 产物：storage/backups/YYYYmmdd-HHMMSS/{database.sql.gz,uploads.tar.gz,verifications.tar.gz,manifest.json}
+ * manifest.json 的 files 段记录各产物 sha256 与 bytes，可用 bin/restore-check.php 核验。
  */
 
 define('BASE_PATH', dirname(__DIR__));
@@ -94,11 +95,24 @@ try {
         }
     }
 
+    // 所有产物落盘后再计算校验和并写入 manifest
+    $files = [];
+    foreach (['database.sql.gz', 'uploads.tar.gz', 'verifications.tar.gz'] as $artifact) {
+        $path = $target . '/' . $artifact;
+        if (is_file($path)) {
+            $files[$artifact] = [
+                'sha256' => hash_file('sha256', $path),
+                'bytes' => (int) filesize($path),
+            ];
+        }
+    }
+
     file_put_contents($target . '/manifest.json', json_encode([
         'created_at' => date(DATE_ATOM),
         'database' => config('db.database'),
         'php' => PHP_VERSION,
         'uploads' => $includeUploads,
+        'files' => $files,
     ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
 
     // 清理旧备份
