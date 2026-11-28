@@ -39,6 +39,7 @@ final class Api
                 'message' => $message,
                 ...$extra,
             ],
+            'request_id' => $GLOBALS['request_id'] ?? null,
         ], $status);
     }
 
@@ -63,11 +64,12 @@ final class Api
             );
         } catch (\Throwable $e) {
             error_log(sprintf(
-                '[api] %s: %s in %s:%d',
+                '[api] %s: %s in %s:%d [request_id=%s]',
                 $e::class,
                 $e->getMessage(),
                 $e->getFile(),
-                $e->getLine()
+                $e->getLine(),
+                $GLOBALS['request_id'] ?? '-'
             ));
             return self::error('internal_error', '服务暂时不可用，请稍后再试', 500);
         }

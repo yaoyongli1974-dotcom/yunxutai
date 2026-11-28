@@ -51,8 +51,9 @@ if (PHP_SAPI !== 'cli') {
     // 不暴露 PHP 版本（等价 php.ini expose_php=Off，且无需重启 FPM）。
     header_remove('X-Powered-By');
 
+    // 仅可信反向代理的 X-Forwarded-Proto 才参与 secure 判定，避免客户端伪造头绕过 HTTPS cookie 保护。
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+        || (config('app.trusted_proxy', false) && ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 
     session_name((string) config('security.session_name', 'jingsi_session'));
     session_set_cookie_params([
@@ -95,6 +96,13 @@ if (PHP_SAPI !== 'cli') {
     header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
     header("Content-Security-Policy: default-src 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
     // HSTS 统一由边缘（deploy/nginx.conf 或 1Panel 站点配置）下发，应用层不再重复发送。
+
+    // 请求关联 ID：优先采用合法的客户端 X-Request-Id，否则生成一个，贯穿审计/日志/响应头。
+    $clientRequestId = (string) ($_SERVER['HTTP_X_REQUEST_ID'] ?? '');
+    $GLOBALS['request_id'] = preg_match('/^[A-Za-z0-9_-]{1,32}$/', $clientRequestId) === 1
+        ? $clientRequestId
+        : bin2hex(random_bytes(16));
+    header('X-Request-Id: ' . $GLOBALS['request_id']);
 }
 
 require BASE_PATH . '/app/error-handler.php';

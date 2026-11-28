@@ -68,7 +68,7 @@ miniprogram/
 - **token 续期**：token 过期后接口返回 `401`，`request.js` 会清 token 并触发 `app.js` 注册的回调跳回登录页；开启微信登录后可先用 `wx.checkSession` 判断微信会话，再 `wx.login` 静默重换 token（`auth.ensureSession()` 已封装）。
 - **404 即无权限**：私密/暂停纪念馆、未发布内容、越权资源在服务端统一返回 404，客户端不要再区分「不存在」与「无权限」，统一提示「无权限访问或内容不存在」。
 - **错误结构**：所有失败响应为 `{ error: { code, message } }`，`request.js` 已归一为 `{ code, message }` 供页面直接展示。
-- **媒体链接**：`/memorials/{slug}` 返回的 `media_url` 是 900 秒有效的签名地址，不要长期缓存，展示前重新拉取详情。
+- **媒体链接**：`/memorials/{slug}` 返回的 `media_url` 是 300 秒有效的签名地址，不要长期缓存，展示前重新拉取详情。
 
 ## 说明
 

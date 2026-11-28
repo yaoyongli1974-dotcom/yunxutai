@@ -1,0 +1,15 @@
+.page{padding:24rpx;background:#f7f3ea;min-height:100vh}
+.head{padding:12rpx 0 24rpx}.title{font-size:40rpx;color:#272119;font-weight:600;display:block}.sub{font-size:24rpx;color:#877d6d;display:block;margin-top:8rpx}
+.bar{margin:12rpx 0;padding:24rpx;background:#5d6f55;color:#fff;border-radius:6rpx;text-align:center;font-size:28rpx}
+.form{background:#fbf8f1;border:1rpx solid #decfba;border-radius:6rpx;padding:20rpx;margin-bottom:20rpx}
+.field{display:block;background:#fff;border:1rpx solid #decfba;padding:18rpx;margin:12rpx 0;border-radius:4rpx;font-size:28rpx;color:#272119}
+.picker{background:#fff}.primary{background:#5d6f55;color:#fff;font-size:28rpx;margin-top:12rpx}
+.tip{display:block;font-size:22rpx;color:#877d6d;line-height:1.6;margin:8rpx 0}
+.empty{padding:60rpx 0;text-align:center;color:#877d6d;font-size:26rpx}
+.card{background:#fbf8f1;border:1rpx solid #decfba;border-radius:6rpx;padding:24rpx;margin:16rpx 0}
+.card-title{font-size:32rpx;color:#272119;display:block}.card-meta{font-size:24rpx;color:#877d6d;display:block;margin-top:8rpx}
+.card-tag{font-size:22rpx;color:#5d6f55;display:block;margin-top:8rpx}
+.detail{background:#fffdf8;border:1rpx solid #decfba;border-radius:6rpx;padding:24rpx;margin-top:24rpx}
+.detail-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12rpx}
+.detail-title{font-size:34rpx;color:#272119;font-weight:600}.close{font-size:24rpx;color:#5d6f55}
+.bio{display:block;font-size:26rpx;color:#40503b;line-height:1.7;margin-top:12rpx}

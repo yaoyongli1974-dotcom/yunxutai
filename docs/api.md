@@ -159,7 +159,7 @@ Authorization: Bearer <token>
   ```
 
 - **空列表**返回 `items: []` 与 HTTP 200，不用 404。
-- **媒体地址**：`media_url` 为签名 URL，**有效期 900 秒**；过期后重新请求详情页获取，不要落库、不要长期缓存。
+- **媒体地址**：`media_url` 为签名 URL，**有效期 300 秒**；过期后重新请求详情页获取，不要落库、不要长期缓存。
 - **匿名**：祭奠支持 `anonymous`，服务端对访客隐藏提交者身份；留言不支持匿名（与 web 端一致）。
 - **审核**：留言/附言可能进入 `pending`，响应中会带 `status`，客户端提示「待馆主确认后展示」而不是当作失败。
 - **幂等**：`POST /auth/logout`、`POST /memorials/{slug}/claim` 重复调用不应产生重复记录；`POST` 祭奠/留言均为一次性行为，不做幂等键。
@@ -355,14 +355,14 @@ Authorization: Bearer <token>
         "caption": "1985 年，学校操场",
         "mime": "image/jpeg",
         "media_url": "https://example.com/media/12?expires=1760000000&sig=...",
-        "expires_in": 900
+        "expires_in": 300
       }
     ]
   }
 }
 ```
 
-- `media_url` 为**签名地址，有效期 900 秒**；`kind`：`photo` / `video` / `audio` / `document`。
+- `media_url` 为**签名地址，有效期 300 秒**；`kind`：`photo` / `video` / `audio` / `document`。
 - `articles` 只含已发布文章；`life` 按时间/排序返回。
 - `media` 只含当前身份可见的媒体：`visibility=members` 的资源需要成员/管理员 token，访客请求会被过滤（不是 403）。
 - 权限：
@@ -396,7 +396,7 @@ Authorization: Bearer <token>
 ### 6.4 `GET /media/{id}?exp=&sig=` — 签名媒体文件
 
 - 鉴权：**签名 URL**（无需 `Authorization` 头——小程序 `<image>` / `<video>` 标签无法自定义请求头）
-- 签名获取：详情/媒体列表响应中的 `media_url` 字段即是现成的本端点地址（`/api/v1/media/{id}?exp=...&sig=...`），直接使用；**有效期 900 秒**，过期后重新请求详情获取新 `media_url`。
+- 签名获取：详情/媒体列表响应中的 `media_url` 字段即是现成的本端点地址（`/api/v1/media/{id}?exp=...&sig=...`），直接使用；**有效期 300 秒**，过期后重新请求详情获取新 `media_url`。
 - 校验：`sig = hash_hmac('sha256', "media:{id}:{exp}", APP_KEY)`，`exp` 须为未来时间戳；任一不满足、媒体不存在或非 `active` 一律 **404**，不区分原因。
 - 安全要点：签名 URL 在有效期内等效于临时访问凭证，**不要落库、不要外发**；`media_url` 只对成员可见媒体应由成员授权后生成。
 - 来源：web `GET /media/{id}`（`MediaController::show`）+ `App\Core\MediaSign` 签名层。
@@ -758,7 +758,7 @@ Authorization: Bearer <token>
 - [x] 服务端配置 `WX_APPID` / `WX_SECRET`，code2session 已用假 code 验证凭据有效（40029 预期拒绝）；secret 只存在服务端环境变量，不写日志、不进仓库。真机 `wx.login` 联调仍待进行。
 - [ ] 真机验证登录、token 过期（401）与重新登录、`wx.checkSession` 续期路径。
 - [ ] 私密/暂停/未核验纪念馆的 404 行为在真机验证；确认没有通过错误码或响应差异泄露馆是否存在。
-- [ ] 签名 `media_url` 900 秒有效期可接受；页面停留超时后重新拉详情，不缓存过期 URL。
+- [ ] 签名 `media_url` 300 秒有效期可接受；页面停留超时后重新拉详情，不缓存过期 URL。
 - [ ] 频率限制生效并有 `429` 文案；客户端不会自动重试造成放大。
 - [ ] 审计日志覆盖登录、祭奠、留言、申领、建馆等敏感动作；不记录密码、token、AppSecret、code。
 - [ ] 隐私与合规：隐私政策说明微信 `openid` 的收集与用途；未成年人保护；活人被祭奠的举报入口仍可用（web 端）。

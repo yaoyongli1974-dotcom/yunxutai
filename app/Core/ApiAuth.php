@@ -89,6 +89,19 @@ final class ApiAuth
         );
     }
 
+    /**
+     * 批量撤销指定用户所有未撤销的 token（改密后旧凭证应立即失效）。
+     */
+    public static function revokeAllFor(int $userId): void
+    {
+        Db::update(
+            'api_tokens',
+            ['revoked_at' => date('Y-m-d H:i:s')],
+            'user_id = ? AND revoked_at IS NULL',
+            [$userId]
+        );
+    }
+
     private static function bearerToken(): ?string
     {
         $header = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? null;

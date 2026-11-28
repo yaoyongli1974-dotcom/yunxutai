@@ -209,9 +209,13 @@ function getArchive(id) { return request.get(BASE + '/archives/' + idPath(id)); 
 function createArchive(id, payload) { return request.post(BASE + '/families/' + idPath(id) + '/archives', payload); }
 function createWorkflow(id, payload) { return request.post(BASE + '/families/' + idPath(id) + '/ai/workflows', payload); }
 function getWorkflow(id) { return request.get(BASE + '/ai/workflows/' + idPath(id)); }
+/** GET /families/{id}/ai/sessions —— 家族口述采访会话列表。 */
+function listOralSessions(id) { return request.get(BASE + '/families/' + idPath(id) + '/ai/sessions'); }
 function cancelWorkflow(id) { return request.post(BASE + '/ai/workflows/' + idPath(id) + '/cancel'); }
 function listEvents(id) { return request.get(BASE + '/families/' + idPath(id) + '/events'); }
 function listExhibitions(id) { return request.get(BASE + '/families/' + idPath(id) + '/exhibitions'); }
+/** POST /exhibitions/{id}/publish —— 发布展馆（草稿 → 已发布）。 */
+function publishExhibition(id) { return request.post(BASE + '/exhibitions/' + idPath(id) + '/publish', {}); }
 function listNotifications() { return request.get(BASE + '/notifications'); }
 function readNotification(id) { return request.post(BASE + '/notifications/' + idPath(id) + '/read'); }
 function readAllNotifications() { return request.post(BASE + '/notifications/read-all'); }
@@ -256,9 +260,11 @@ module.exports = {
   createArchive: createArchive,
   createWorkflow: createWorkflow,
   getWorkflow: getWorkflow,
+  listOralSessions: listOralSessions,
   cancelWorkflow: cancelWorkflow,
   listEvents: listEvents,
   listExhibitions: listExhibitions,
+  publishExhibition: publishExhibition,
   listNotifications: listNotifications,
   readNotification: readNotification,
   readAllNotifications: readAllNotifications,

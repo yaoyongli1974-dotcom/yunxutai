@@ -207,7 +207,7 @@ final class ArchiveService
                 ], $user === null ? 0 : (int) $user['id']);
                 return $id;
             });
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             // 文件系统无法与 MySQL 共享事务：失败时补偿删除已落盘文件。
             $path = Storage::absolute((string) $stored['disk_path']);
             if ($path !== null && is_file($path)) {
@@ -481,6 +481,22 @@ final class ArchiveService
                 "id = ? AND status = 'delete_requested'", [$archiveId]
             );
             if ($n > 0) {
+                if ($approve) {
+                    // R-04：审批通过只标记状态并入队，物理文件清理交由独立幂等任务异步完成。
+                    $files = Db::fetchAll(
+                        'SELECT id, storage_key FROM archive_files WHERE archive_id = ? ORDER BY id',
+                        [$archiveId]
+                    );
+                    foreach ($files as $file) {
+                        Db::query(
+                            'INSERT IGNORE INTO archive_cleanup_queue (archive_id, file_id, storage_key) VALUES (?, ?, ?)',
+                            [$archiveId, (int) $file['id'], (string) $file['storage_key']]
+                        );
+                    }
+                } else {
+                    // 驳回时撤销未完成的清理任务，后续重新申请可再次入队。
+                    Db::query("DELETE FROM archive_cleanup_queue WHERE archive_id = ? AND status <> 'done'", [$archiveId]);
+                }
                 Audit::log($approve ? 'archive.delete.approve' : 'archive.delete.reject', 'archive', $archiveId, [
                     'family_id' => (int) $archive['family_id'], 'to' => $status,
                 ], $user === null ? 0 : (int) $user['id']);

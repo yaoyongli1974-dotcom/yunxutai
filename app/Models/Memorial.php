@@ -98,7 +98,7 @@ final class Memorial
              JOIN memorials m ON m.id = mm.memorial_id
              JOIN deceased d ON d.id = m.deceased_id
              WHERE mm.user_id = ? AND mm.status = ?
-             ORDER BY m.updated_at DESC',
+             ORDER BY m.updated_at DESC LIMIT 200',
             [$userId, 'active']
         );
     }

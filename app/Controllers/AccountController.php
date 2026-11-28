@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Core\ApiAuth;
 use App\Core\Audit;
 use App\Core\Auth;
 use App\Core\Csrf;
@@ -109,6 +110,8 @@ final class AccountController
         }
 
         User::update((int) $user['id'], ['password_hash' => password_hash($password, PASSWORD_DEFAULT)]);
+        // 改密后该用户已签发的 API token 立即失效，需重新登录小程序获取新 token。
+        ApiAuth::revokeAllFor((int) $user['id']);
         Audit::log('account.update_password', 'user', (int) $user['id']);
         session_regenerate_id(true);
         $_SESSION['csrf'] = bin2hex(random_bytes(32));

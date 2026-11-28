@@ -1,21 +1,38 @@
 <?php
 declare(strict_types=1);
 
+$appEnv = getenv('APP_ENV') ?: '';
 $appKey = getenv('APP_KEY');
-if ($appKey === false || $appKey === '') {
+$appKey = $appKey === false ? '' : $appKey;
+
+// APP_KEY 是媒体签名 URL 的唯一 HMAC 密钥：只有显式声明 local/testing 环境才允许占位符。
+// APP_ENV 未设置时按未知环境处理，避免生产漏配环境变量后仍使用可伪造的开发密钥。
+if (($appKey === '' || $appKey === 'dev-only-key-change-before-production')
+    && !in_array($appEnv, ['local', 'testing'], true)) {
+    throw new RuntimeException('APP_KEY 未配置或仍为开发占位符，非本地/测试环境禁止启动；请设置强随机 APP_KEY。');
+}
+if ($appKey === '' || $appKey === 'dev-only-key-change-before-production') {
     $appKey = 'dev-only-key-change-before-production';
+}
+
+// 调试模式默认关闭：本地/测试可显式开启；生产环境开启会泄露堆栈与内部信息，直接拒绝启动。
+$appDebug = filter_var(getenv('APP_DEBUG') ?: 'false', FILTER_VALIDATE_BOOL);
+if ($appEnv === 'production' && $appDebug) {
+    throw new RuntimeException('生产环境禁止开启 APP_DEBUG（调试模式）；请将 APP_DEBUG 设为 false 后再启动。');
 }
 
 return [
     'app' => [
         'name'        => getenv('APP_NAME') ?: '云叙台',
-        'version'     => getenv('APP_VERSION') ?: 'v2.0.1',
+        'version'     => getenv('APP_VERSION') ?: 'v2.1.0',
         'tagline'     => '记取来时路，安放未尽言',
         'url'         => rtrim((string) (getenv('APP_URL') ?: ''), '/'),
-        'env'         => getenv('APP_ENV') ?: 'local',
-        'debug'       => filter_var(getenv('APP_DEBUG') ?: 'true', FILTER_VALIDATE_BOOL),
+        'env'         => $appEnv,
+        'debug'       => $appDebug,
         'timezone'    => getenv('APP_TIMEZONE') ?: 'Asia/Shanghai',
         'key'         => $appKey,
+        // 仅可信反向代理后的 X-Forwarded-Proto 才用于判定 cookie secure。
+        'trusted_proxy' => filter_var(getenv('APP_TRUSTED_PROXY') ?: 'false', FILTER_VALIDATE_BOOL),
         'admin_email' => getenv('ADMIN_EMAIL') ?: 'admin@example.com',
         'support_email' => getenv('SUPPORT_EMAIL') ?: 'support@example.com',
     ],

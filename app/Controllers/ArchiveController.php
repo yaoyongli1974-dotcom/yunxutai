@@ -88,25 +88,26 @@ final class ArchiveController
         $canEdit = Policy::can('archive.edit', ['family_id' => $familyId], Auth::user());
         $allPersons = [];
         if ($canEdit) {
-            foreach (Db::fetchAll('SELECT id FROM family_persons WHERE family_id = ? AND deleted_at IS NULL ORDER BY id', [$familyId]) as $row) {
+            foreach (Db::fetchAll('SELECT id FROM family_persons WHERE family_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 200', [$familyId]) as $row) {
                 $person = FamilyPersonService::getVisible(Auth::user(), (int) $row['id']);
                 if ($person !== null) {
                     $allPersons[] = $person;
                 }
             }
         }
+        $files = ArchiveService::files((int) $archive['id']);
         return View::render('archive/show', [
             'title' => (string) $archive['title'],
             'family' => $family,
             'archive' => $archive,
-            'files' => ArchiveService::files((int) $archive['id']),
+            'files' => $files,
             'tags' => ArchiveService::tags((int) $archive['id']),
             'persons' => ArchiveService::linkedPersons((int) $archive['id']),
             'allPersons' => $allPersons,
             'versions' => $canEdit ? ArchiveService::versions(Auth::user(), (int) $archive['id']) : [],
-            'photoTags' => (static function () use ($archive): array {
+            'photoTags' => (static function () use ($files): array {
                 $map = [];
-                foreach (ArchiveService::files((int) $archive['id']) as $file) {
+                foreach ($files as $file) {
                     $map[(int) $file['id']] = ArchiveService::photoTags((int) $file['id']);
                 }
                 return $map;

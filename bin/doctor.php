@@ -116,7 +116,12 @@ try {
     Db::value('SELECT 1');
     ok('数据库连接正常（' . config('db.database') . '）');
 
-    $required = ['users', 'memorials', 'memorial_members', 'memorial_verifications', 'tributes', 'messages', 'media', 'reports', 'audit_logs'];
+    $required = [
+        'users', 'memorials', 'memorial_members', 'memorial_verifications', 'tributes', 'messages', 'media', 'reports', 'audit_logs',
+        'families', 'family_members', 'family_invitations', 'family_persons', 'person_relationships',
+        'archives', 'archive_files', 'ai_workflows', 'ai_workflow_steps', 'memory_facts', 'oral_history_sessions',
+        'schema_migrations',
+    ];
     $missing = [];
     foreach ($required as $table) {
         if (!Db::value('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?', [$table])) {
@@ -127,6 +132,13 @@ try {
         ok('核心数据表完整');
     } else {
         fail('缺少数据表：' . implode(', ', $missing) . '（请执行 php bin/install.php）');
+    }
+
+    $failedMigrations = (int) Db::value("SELECT COUNT(*) FROM schema_migrations WHERE status <> 'applied'");
+    if ($failedMigrations > 0) {
+        fail('存在未应用或失败的数据库迁移，请执行 php bin/migrate.php');
+    } else {
+        ok('数据库迁移状态正常');
     }
 
     $admin = Db::value('SELECT COUNT(*) FROM users WHERE role = ? AND status = ?', ['admin', 'active']);

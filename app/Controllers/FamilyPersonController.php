@@ -32,16 +32,10 @@ final class FamilyPersonController
         $familyId = (int) $id;
         $family = $this->family($request, $familyId, 'family.view');
         $rows = Db::fetchAll(
-            'SELECT * FROM family_persons WHERE family_id = ? AND deleted_at IS NULL ORDER BY id',
+            'SELECT * FROM family_persons WHERE family_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 200',
             [$familyId]
         );
-        $persons = [];
-        foreach ($rows as $row) {
-            $visible = FamilyPersonService::getVisible(Auth::user(), (int) $row['id']);
-            if ($visible !== null) {
-                $persons[] = $visible;
-            }
-        }
+        $persons = FamilyPersonService::visibleRows(Auth::user(), $rows);
         return View::render('family/persons/index', [
             'title' => '家族人物', 'family' => $family, 'persons' => $persons,
             'canEdit' => Policy::can('person.edit', ['family_id' => $familyId, 'family' => $family], Auth::user()),

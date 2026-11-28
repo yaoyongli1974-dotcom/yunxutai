@@ -9,7 +9,7 @@ set_exception_handler(static function (Throwable $e): void {
     $debug = (bool) config('app.debug', false);
     $status = $e instanceof HttpException ? $e->getStatusCode() : 500;
 
-    error_log(sprintf('[%s] %s: %s in %s:%d', $status, $e::class, $e->getMessage(), $e->getFile(), $e->getLine()));
+    error_log(sprintf('[%s] %s: %s in %s:%d [request_id=%s]', $status, $e::class, $e->getMessage(), $e->getFile(), $e->getLine(), $GLOBALS['request_id'] ?? '-'));
 
     if (PHP_SAPI === 'cli') {
         fwrite(STDERR, $e->getMessage() . PHP_EOL);
@@ -39,7 +39,10 @@ set_exception_handler(static function (Throwable $e): void {
             $message = '服务暂时不可用，请稍后再试。';
         }
 
-        $payload = ['error' => ['code' => $code, 'message' => $message]];
+        $payload = [
+            'error' => ['code' => $code, 'message' => $message],
+            'request_id' => $GLOBALS['request_id'] ?? null,
+        ];
         if ($debug) {
             $payload['debug'] = [
                 'exception' => $e::class,

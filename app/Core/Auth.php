@@ -39,6 +39,15 @@ final class Auth
         self::$resolved = true;
     }
 
+    /**
+     * 清除已解析的用户缓存：同一进程内用户状态/角色变更后需调用，避免后续请求读到旧值。
+     */
+    public static function clear(): void
+    {
+        self::$user = null;
+        self::$resolved = false;
+    }
+
     public static function check(): bool
     {
         return self::user() !== null;

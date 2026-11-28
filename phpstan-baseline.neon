@@ -85,18 +85,6 @@ parameters:
 			path: app/Services/AiWorkflowService.php
 
 		-
-			message: '#^Caught class App\\Services\\Throwable not found\.$#'
-			identifier: class.notFound
-			count: 1
-			path: app/Services/ArchiveService.php
-
-		-
-			message: '#^Throwing object of an unknown class App\\Services\\Throwable\.$#'
-			identifier: class.notFound
-			count: 1
-			path: app/Services/ArchiveService.php
-
-		-
 			message: '#^Result of && is always false\.$#'
 			identifier: booleanAnd.alwaysFalse
 			count: 1

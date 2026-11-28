@@ -8,6 +8,11 @@ PORT="${TEST_PORT:-8110}"
 BASE_URL="http://127.0.0.1:${PORT}"
 DB_NAME="${TEST_DB:-jidian_test}"
 
+if [[ ! "$DB_NAME" =~ ^jidian_test ]]; then
+  echo "拒绝执行：TEST_DB 必须以 jidian_test 开头，防止误删非测试数据库（当前：$DB_NAME）" >&2
+  exit 1
+fi
+
 export DB_DATABASE="$DB_NAME"
 export APP_URL="$BASE_URL"
 export APP_DEBUG=true
@@ -41,5 +46,10 @@ for _ in $(seq 1 30); do
     fi
     sleep 0.2
 done
+
+if ! curl -fsS -o /dev/null "$BASE_URL/" 2>/dev/null; then
+    echo "错误：测试服务器未能启动（$BASE_URL），终止测试以避免误报成功。" >&2
+    exit 1
+fi
 
 BASE_URL="$BASE_URL" php tests/run.php

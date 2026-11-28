@@ -1,4 +1,4 @@
-const api = require('../../../utils/api');
+const api = require('../../utils/api');
 const privacies = ['private', 'unlisted', 'public'];
 Page({
   data: { families: [], loading: true, showForm: false, name: '', slug: '', privacies: privacies, privacyIndex: 0 },
@@ -29,5 +29,6 @@ Page({
       that.load();
     }).catch(function (err) { wx.showToast({ title: (err && err.message) || '创建失败', icon: 'none' }); });
   },
-  onOpen(e) { wx.navigateTo({ url: '/pages/families/detail?id=' + e.currentTarget.dataset.id }); }
+  onOpen(e) { wx.navigateTo({ url: '/pages/families/detail?id=' + e.currentTarget.dataset.id }); },
+  onAcceptInvite() { wx.navigateTo({ url: '/pages/invitations/accept' }); }
 });

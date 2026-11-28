@@ -78,6 +78,40 @@ $coverId = (int) ($memorial['cover_media_id'] ?? 0);
             </form>
         </section>
 
+        <section class="manage-section batch-panel" data-batch-panel hidden>
+            <h2>批量上传</h2>
+            <p class="manage-note" style="margin-top:-0.4rem;">一次选择多个文件，按选择顺序逐个上传；失败的文件可单独重试。</p>
+            <form class="batch-form" method="post" action="<?= e(url($base . '/media')) ?>" enctype="multipart/form-data" data-batch-upload data-batch-results="#media-batch-results">
+                <?= csrf_field() ?>
+                <div class="batch-form__row">
+                    <label class="field">
+                        <span>文件分类</span>
+                        <select name="kind">
+                            <option value="photo">照片</option>
+                            <option value="video">视频</option>
+                            <option value="audio">音频</option>
+                            <option value="document">文档</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>可见范围</span>
+                        <select name="visibility">
+                            <option value="visitors">访客可见</option>
+                            <option value="members">仅成员可见</option>
+                        </select>
+                    </label>
+                </div>
+                <label class="field batch-form__file">
+                    <span>选择多个文件</span>
+                    <input type="file" name="file[]" multiple required accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,audio/mpeg,audio/mp4,application/pdf">
+                </label>
+                <div><button class="button button--small" type="submit">按顺序上传</button></div>
+            </form>
+            <p class="batch-summary" data-batch-summary role="status" aria-live="polite"></p>
+            <ul class="batch-results" id="media-batch-results" aria-live="polite"></ul>
+            <p class="manage-note">上传完成后刷新页面即可看到新文件；上方的单个上传表单始终可用。</p>
+        </section>
+
         <section class="manage-section">
             <h2>全部文件</h2>
             <p class="manage-note" style="margin-top:-0.4rem;">封面照片需为“访客可见”的展示中照片。</p>
@@ -155,3 +189,4 @@ $coverId = (int) ($memorial['cover_media_id'] ?? 0);
         </section>
     </div>
 </div>
+<script src="<?= e(url('assets/js/batch-upload.js')) ?>" defer></script>

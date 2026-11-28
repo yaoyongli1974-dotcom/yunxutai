@@ -9,6 +9,7 @@ use App\Api\Input;
 use App\Api\Presenter;
 use App\Api\WechatLogin;
 use App\Core\ApiAuth;
+use App\Core\Audit;
 use App\Core\Auth;
 use App\Core\Db;
 use App\Core\RateLimiter;
@@ -56,6 +57,9 @@ final class AuthController extends BaseController
 
         $token = ApiAuth::createToken($user, 'miniapp');
         RateLimiter::clear(\App\Core\RateLimitKeys::make('token', $request->ip()));
+        Audit::log('auth.api_token_create', 'user', (int) $user['id'], [
+            'purpose' => 'miniapp',
+        ], (int) $user['id']);
 
         return Api::ok([
             'token' => (string) $token['token'],

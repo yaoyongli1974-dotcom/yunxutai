@@ -1,0 +1,17 @@
+.page{padding:24rpx;background:#f7f3ea;min-height:100vh}
+.head{padding:12rpx 0 24rpx}.title{font-size:40rpx;color:#272119;font-weight:600;display:block}.sub{font-size:24rpx;color:#877d6d;display:block;margin-top:8rpx}
+.caveat{background:#fff5e8;border:1rpx solid #e6c9a0;border-radius:6rpx;padding:18rpx;font-size:24rpx;color:#8a5a25;line-height:1.7;margin-bottom:16rpx}
+.section-title{font-size:30rpx;color:#272119;margin:24rpx 0 12rpx;font-weight:600}
+.form{background:#fbf8f1;border:1rpx solid #decfba;border-radius:6rpx;padding:20rpx}
+.field{display:block;background:#fff;border:1rpx solid #decfba;padding:18rpx;border-radius:4rpx;font-size:28rpx;color:#272119}
+.area{width:auto;min-height:200rpx;line-height:1.6}
+.primary{background:#5d6f55;color:#fff;font-size:28rpx;margin-top:16rpx}
+.bar{margin:24rpx 0 12rpx;padding:20rpx 24rpx;background:#5d6f55;color:#fff;border-radius:6rpx;text-align:center;font-size:28rpx}
+.card{background:#fbf8f1;border:1rpx solid #decfba;border-radius:6rpx;padding:24rpx;margin:12rpx 0}
+.card-head{display:flex;justify-content:space-between;align-items:center}
+.card-title{font-size:30rpx;color:#272119}.card-meta{font-size:24rpx;color:#877d6d;display:block;margin-top:8rpx;line-height:1.6}
+.card-meta.warn{color:#9c4a3c}
+.tag{font-size:22rpx;color:#5d6f55;background:#eef2ea;border-radius:20rpx;padding:6rpx 16rpx}
+.step{background:#fbf8f1;border:1rpx solid #decfba;border-left:6rpx solid #5d6f55;border-radius:6rpx;padding:20rpx;margin:12rpx 0}
+.step-title{font-size:28rpx;color:#272119;display:block}
+.empty{padding:40rpx 0;text-align:center;color:#877d6d;font-size:26rpx}

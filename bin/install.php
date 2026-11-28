@@ -117,6 +117,14 @@ echo "管理员账号已创建，请首次登录后立即修改密码（密码�
         }
     }
 
+    // schema.sql 仅含基线结构；增量迁移（含 AI 锁字段、审计 request_id 等）必须随后应用，
+    // 否则全新安装的 AI 工作流/审计写入会因缺列失败。迁移 runner 自身可重复执行。
+    echo "\n== 应用增量迁移 ==\n";
+    passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(BASE_PATH . '/bin/migrate-v2.php'), $migrateExit);
+    if ($migrateExit !== 0) {
+        throw new RuntimeException('增量迁移失败，请检查 storage/logs 与 schema_migrations。');
+    }
+
     echo "\n安装完成。本地启动：php -S 127.0.0.1:8099 -t public\n";
     if ((bool) config('app.debug')) {
         echo "提示：生产环境请设置 APP_DEBUG=false、APP_URL=https://你的域名，并启用 HTTPS。\n";

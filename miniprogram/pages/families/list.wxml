@@ -1,6 +1,7 @@
 <view class="page">
   <view class="head"><text class="title">我的家族</text><text class="sub">记取来时路，安放未尽言</text></view>
   <view class="bar" bindtap="toggleForm">＋ 新建家族</view>
+  <view class="bar" bindtap="onAcceptInvite">接受家人邀请</view>
   <view class="form" wx:if="{{showForm}}">
     <input class="field" placeholder="家族名称" value="{{name}}" bindinput="onName" />
     <input class="field" placeholder="标识（小写字母/数字/连字符）" value="{{slug}}" bindinput="onSlug" />

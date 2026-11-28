@@ -191,7 +191,8 @@ final class MemorialService
         ];
 
         Memorial::update((int) $memorial['id'], $data);
-        Audit::log('memorial.update_settings', 'memorial', (int) $memorial['id'], $data);
+        // 只记录变更字段名，不把原始设置值写入审计日志。
+        Audit::log('memorial.update_settings', 'memorial', (int) $memorial['id'], ['fields' => array_keys($data)]);
         return [];
     }
 

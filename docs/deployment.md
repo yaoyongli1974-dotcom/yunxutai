@@ -142,19 +142,39 @@ MAIL_SMTP_TIMEOUT=10
 20 3 * * * cd /srv/jidian && php bin/backup.php >> storage/logs/backup.log 2>&1
 ```
 
-产物：`storage/backups/YYYYmmdd-HHMMSS/database.sql.gz`、`uploads.tar.gz`、`verifications.tar.gz` 与 `manifest.json`。
+产物：`storage/backups/YYYYmmdd-HHMMSS/database.sql.gz`、`uploads.tar.gz`、`verifications.tar.gz` 与 `manifest.json`。`manifest.json` 的 `files` 段记录每个实际生成产物的 `sha256` 与 `bytes`；所有产物写完后才计算校验和并生成 manifest。
+
+每次备份后（以及演练/恢复前）先做完整性核验：
+
+```bash
+php bin/restore-check.php storage/backups/YYYYmmdd-HHMMSS
+```
+
+该命令按 manifest 逐项核对产物是否存在、`sha256` 与 `bytes` 是否一致，解压 `database.sql.gz` 统计 `CREATE TABLE` / `INSERT INTO`；仅当校验和全部一致且 `tables>0`、`inserts>0` 时退出 0，否则退出 1 并打印 `FAILED`、原因及 `sha256/bytes/tables/inserts`。传入单个 `.sql.gz`（旧版备份）时仍可用，但没有 manifest 校验和可比，只检查 gzip 可读、含建表语句与数据行。**restore-check 是备份完整性检查，不导入数据库，也不等于完整恢复成功的证明**——它无法验证权限、配置、附件可读性或导入本身是否成功。
 
 `verifications.tar.gz` 含身份证件/死亡证明等敏感材料，必须使用独立密钥加密后异地保存，访问需审批与审计。恢复时先恢复数据库，再解包上传与核验材料；核验材料的目录权限应保持 750/640。
 
-恢复演练（至少每季度）：
+恢复演练（至少每季度，仅在隔离的非生产环境进行，严禁指向生产库）：
 
 ```bash
-# 1. 新建空库并导入
-gunzip -c database.sql.gz | mysql -u user -p dbname
-# 2. 解包上传目录与核验材料目录
-tar xzf uploads.tar.gz -C storage
-tar xzf verifications.tar.gz -C storage
-# 3. 校验：登录、纪念馆页、媒体鉴权、审核队列、核验材料下载
+B=storage/backups/YYYYmmdd-HHMMSS
+
+# 0. 完整性核验（先做，失败即停止）
+php bin/restore-check.php "$B"
+
+# 1. 新建隔离空库并导入（数据库账号、库名均使用演练环境）
+mysql -u user -p -e 'CREATE DATABASE jidian_restore CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+gunzip -c "$B/database.sql.gz" | mysql -u user -p jidian_restore
+
+# 2. 解包上传目录与核验材料目录到演练环境
+tar xzf "$B/uploads.tar.gz" -C storage
+tar xzf "$B/verifications.tar.gz" -C storage
+
+# 3. 对比行数：分别对源库与 jidian_restore 执行 SELECT COUNT(*) FROM <table>，
+#    至少覆盖 users、memorials、messages、api_tokens、wx_identities 等关键表，结果须一致
+# 4. 将演练环境指向 jidian_restore，运行 php bin/doctor.php，确认无警告
+# 5. 校验业务：登录、纪念馆页、媒体鉴权、审核队列、核验材料下载
+# 6. 演练结束删除演练库与解包出的文件，保留演练记录
 ```
 
 备份应加密并异地保存；包含个人信息与逝者资料，访问需授权与审计。
@@ -182,7 +202,7 @@ tar xzf verifications.tar.gz -C storage
 
 - [ ] `APP_DEBUG=false`，错误不显示堆栈。
 - [ ] `APP_KEY` 随机且未提交到版本库。
-- [ ] HTTPS 全站，HTTP 跳转，HSTS。
+- [ ] HTTPS 全站，HTTP 跳转，HSTS；边缘补发的 CSP 与应用值一致且不重复（仅绕过 PHP 的静态响应），HTTPS 下会话 Cookie 带 `Secure`。
 - [ ] Web 根目录仅 `public/`；`storage/` 不可 URL 直达。
 - [ ] 数据库最小权限、强密码、仅内网访问。
 - [ ] 上传限制与 MIME 校验生效（尝试上传 `.php` 应被拒绝）。

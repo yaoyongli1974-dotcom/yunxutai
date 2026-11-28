@@ -2178,6 +2178,15 @@ test('2.0 迁移版本记录完整且可重复执行', function (): void {
     foreach ($checksums as $row) {
         check((string) $row['checksum'] !== '', '迁移 checksum 不应为空');
     }
+    // Phase E：逐个比对磁盘迁移文件内容与数据库登记的 checksum，覆盖全部版本而非仅 001-006。
+    $files = glob(BASE_PATH . '/database/migrations/*.php') ?: [];
+    sort($files);
+    $recorded = array_column($checksums, 'checksum');
+    check(count($files) === count($recorded), '迁移文件数与数据库登记数不一致');
+    foreach ($files as $file) {
+        $hash = hash('sha256', (string) file_get_contents($file));
+        check(in_array($hash, $recorded, true), '迁移 checksum 与文件不符：' . basename($file));
+    }
     foreach (['families', 'family_members', 'family_invitations', 'family_persons', 'person_memorial_links'] as $table) {
         check(
             (int) \App\Core\Db::value('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?', [$table]) > 0,
@@ -3346,7 +3355,7 @@ test('Round2 J：档案版本事务与删除状态机', function (): void {
 test('页脚显示版本号印记', function (): void {
     $home = http('GET', '/');
     check_contains($home['body'], 'site-footer__version');
-    check_contains($home['body'], 'v2.0.1');
+    check_contains($home['body'], 'v2.1.0');
 });
 
 test('代码审查：Db 拒绝非法列名', function (): void {
@@ -3364,6 +3373,405 @@ test('代码审查：Db 拒绝非法列名', function (): void {
         $rejected = true;
     }
     check($rejected, 'Db::update 必须校验列名');
+});
+
+echo "\n[Phase B 安全回归]\n";
+
+test('B-R01：非 local/testing 环境使用占位 APP_KEY 时配置加载失败', function (): void {
+    $php = escapeshellarg(PHP_BINARY);
+    $cmd = 'cd ' . escapeshellarg(BASE_PATH) . ' && APP_ENV=production APP_KEY= ' . $php . ' -r '
+        . escapeshellarg('define("BASE_PATH", getcwd()); require "config/config.php"; echo "loaded";') . ' 2>&1';
+    $out = [];
+    $rc = 0;
+    exec($cmd, $out, $rc);
+    check($rc !== 0, '生产环境使用空 APP_KEY 应 fail-closed');
+    check(str_contains(implode("\n", $out), 'APP_KEY'), '错误信息应指出 APP_KEY');
+});
+
+test('B-B1/B5：签名媒体绑定可见性，私有响应 no-store', function (): void {
+    $detail = api('GET', '/api/v1/memorials/zhang-mingyuan');
+    $mediaList = $detail['data']['data']['media'] ?? [];
+    check(is_array($mediaList) && $mediaList !== [], '前置：详情应含媒体');
+    $item = $mediaList[0];
+    $url = (string) ($item['media_url'] ?? '');
+    check(str_contains($url, 'sig='), '应返回签名 URL');
+
+    reset_session();
+    $ok = http('GET', $url, null, [], false);
+    check($ok['status'] === 200, '有效签名应返回 200');
+    check(str_contains($ok['headers'], 'no-store'), '私有媒体响应应 no-store');
+
+    $mediaId = (int) $item['id'];
+    $originalVisibility = (string) ($item['visibility'] ?? 'visitors');
+    Db::update('media', ['visibility' => 'members'], 'id = ?', [$mediaId]);
+    try {
+        $denied = http('GET', $url, null, [], false);
+        check($denied['status'] === 404, '可见性下调后旧签名应失效（404）');
+    } finally {
+        Db::update('media', ['visibility' => $originalVisibility], 'id = ?', [$mediaId]);
+    }
+});
+
+test('B-R02：纪念馆邀请仅限受邀邮箱本人，空邮箱邀请被拒绝', function (): void {
+    $ownerToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => 'demo@example.com', 'password' => 'Demo@123456',
+    ]));
+    check($ownerToken !== '', '前置：馆主应可登录');
+    $memorialId = (int) Db::value('SELECT id FROM memorials WHERE slug = ?', ['zhang-mingyuan']);
+    $invitee = make_family_user('b-invitee');
+    $other = make_family_user('b-other');
+
+    $invite = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/invite', [
+        'email' => $invitee['email'], 'role' => 'viewer',
+    ], $ownerToken);
+    check($invite['status'] === 201, '邀请应创建成功');
+    $inviteUrl = (string) ($invite['data']['data']['invite_url'] ?? '');
+    $token = basename((string) (parse_url($inviteUrl, PHP_URL_PATH) ?: ''));
+    check($token !== '', '应返回邀请链接');
+
+    login((string) $other['email'], 'FamilyTest@123');
+    $csrf = csrf_token('/invitations/' . $token);
+    $denied = http('POST', '/invitations/' . $token, ['_token' => $csrf]);
+    check($denied['status'] === 404, '非受邀用户接受应 404');
+
+    login((string) $invitee['email'], 'FamilyTest@123');
+    $csrf = csrf_token('/invitations/' . $token);
+    $accepted = http('POST', '/invitations/' . $token, ['_token' => $csrf]);
+    check($accepted['status'] === 200, '受邀邮箱本人应接受成功');
+
+    $empty = api('POST', '/api/v1/manage/memorials/' . $memorialId . '/members/invite', [
+        'email' => '', 'role' => 'viewer',
+    ], $ownerToken);
+    check($empty['status'] === 422, '空邮箱邀请应 422');
+});
+
+test('B-R12：修改密码后旧 API Token 立即失效', function (): void {
+    $user = make_family_user('b-pwd');
+    $email = (string) $user['email'];
+    $oldToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => $email, 'password' => 'FamilyTest@123',
+    ]));
+    check($oldToken !== '', '前置：应能换取 token');
+
+    login($email, 'FamilyTest@123');
+    $csrf = csrf_token('/account?tab=security');
+    $changed = http('POST', '/account/password', [
+        '_token' => $csrf,
+        'current_password' => 'FamilyTest@123',
+        'password' => 'Changed@123456',
+        'password_confirmation' => 'Changed@123456',
+    ]);
+    check($changed['status'] === 200, '修改密码应成功');
+
+    check(api('GET', '/api/v1/me', null, $oldToken)['status'] === 401, '旧 token 应失效');
+    $newToken = api_token_of(api('POST', '/api/v1/auth/token', [
+        'email' => $email, 'password' => 'Changed@123456',
+    ]));
+    check($newToken !== '', '新密码应可换取 token');
+    check(api('GET', '/api/v1/me', null, $newToken)['status'] === 200, '新 token 应可用');
+});
+
+test('B-R03：撤回授权后 AI 任务不再执行，失败任务不复活', function (): void {
+    $owner = make_family_user('b-consent');
+    $familyId = \App\Services\FamilyService::create($owner, '同意复核家族', 'b-consent-' . bin2hex(random_bytes(3)));
+    $sessionId = \App\Services\AiWorkflowService::createOralSession($owner, $familyId, [
+        'title' => '授权复核', 'topic' => '测试',
+    ]);
+    \App\Services\AiWorkflowService::setConsent($owner, $sessionId, true);
+    $workflowId = \App\Services\AiWorkflowService::create(
+        $owner, $familyId, 'extract_facts',
+        ['session_id' => $sessionId, 'text' => '家族记忆资料'],
+        'b-consent-' . $sessionId
+    );
+    \App\Services\AiWorkflowService::setConsent($owner, $sessionId, false);
+
+    try {
+        \App\Services\AiWorkflowService::process($workflowId, 'b-test-worker');
+        check(false, '撤回授权后不应继续执行');
+    } catch (\App\Core\HttpException $e) {
+        check($e->getStatusCode() === 422, '应返回 422');
+    }
+    $row = Db::fetch('SELECT status, failure_class, retry_count, max_retries FROM ai_workflows WHERE id = ?', [$workflowId]);
+    check($row !== null, '工作流应存在');
+    check((string) $row['failure_class'] === 'input_error', '应归类为 input_error');
+    check((int) $row['retry_count'] >= (int) $row['max_retries'], '不应继续重试');
+
+    Db::update('ai_workflows', ['status' => 'failed', 'retry_count' => 0], 'id = ?', [$workflowId]);
+    \App\Services\AiWorkflowService::revokeSessionConsent($owner, $sessionId);
+    check(
+        (string) Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$workflowId]) === 'cancelled',
+        'failed 工作流也应在撤回授权时取消'
+    );
+});
+
+echo "\n[Phase C：数据库结构与请求追踪]\n";
+
+test('C1：迁移列与元数据表结构完整', function (): void {
+    $expectedColumns = [
+        ['ai_workflows', 'lock_version'],
+        ['ai_workflows', 'heartbeat_at'],
+        ['ai_workflows', 'last_error_at'],
+        ['memory_facts', 'source_archive_id'],
+        ['memory_facts', 'source_excerpt'],
+        ['memory_facts', 'subject_type'],
+        ['audit_logs', 'request_id'],
+    ];
+    foreach ($expectedColumns as [$table, $column]) {
+        $found = (int) Db::value(
+            'SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?',
+            [$table, $column]
+        );
+        check($found === 1, '缺少列 ' . $table . '.' . $column);
+    }
+    check(db_count('archive_cleanup_queue') >= 0, '归档清理队列表不可查询');
+    $versions = Db::fetchAll("SELECT version FROM schema_migrations WHERE version LIKE '20261128_%'");
+    $found = array_column($versions, 'version');
+    foreach (['20261128_001', '20261128_002', '20261128_003', '20261128_004'] as $version) {
+        check(in_array($version, $found, true), '缺少迁移版本 ' . $version);
+    }
+    check(db_count('schema_migrations', "status <> 'applied'") === 0, '存在未应用的迁移');
+});
+
+test('C4：Web/API 响应携带 request_id，审计记录可关联', function (): void {
+    $page = http('GET', '/', null, [], false);
+    check($page['status'] === 200, '首页应可访问');
+    check(preg_match('/X-Request-Id:\s*([A-Za-z0-9_-]{1,32})/i', $page['headers'], $m) === 1, '缺少 X-Request-Id 响应头');
+    check(strlen($m[1]) === 32 || ctype_alnum($m[1]), '请求 ID 格式不合法');
+
+    $unauth = api('GET', '/api/v1/me');
+    check($unauth['status'] === 401, '未登录访问 /me 应 401');
+    check(isset($unauth['data']['request_id']), 'API 错误缺少 request_id');
+    check(is_string($unauth['data']['request_id']), 'request_id 应为字符串');
+
+    $owner = make_family_user('c-request-audit');
+    \App\Services\FamilyService::create($owner, '请求追踪家族', 'c-req-' . bin2hex(random_bytes(3)));
+    check(
+        db_count('audit_logs', "action = 'family.create' AND request_id IS NOT NULL AND request_id <> ''") >= 1,
+        '审计日志未写入 request_id'
+    );
+});
+
+echo "\n[Phase C：AI 可靠性与事实来源]\n";
+
+test('C2：取消工作流后旧 fencing token 无法写回结果', function (): void {
+    $owner = make_family_user('c-fence');
+    $familyId = \App\Services\FamilyService::create($owner, '围栏家族', 'c-fence-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1990年3月，父亲从北方迁往南方。',
+    ], 'c-fence-key');
+    $claimed = \App\Services\AiWorkflowService::claimStrict('c-worker-a', 50);
+    $token = null;
+    foreach ($claimed as $row) {
+        if ((int) $row['id'] === $id) {
+            $token = (int) $row['lock_version'];
+            break;
+        }
+    }
+    check($token !== null, '测试任务未被领取');
+    \App\Services\AiWorkflowService::cancel($owner, $id);
+    try {
+        \App\Services\AiWorkflowService::process($id, 'c-worker-a', $token);
+        check(false, '旧 Worker 不应能写回已取消任务');
+    } catch (RuntimeException $e) {
+        check(str_contains($e->getMessage(), '持有权') || str_contains($e->getMessage(), '不可执行'), '拒绝原因不符');
+    }
+    check((string) Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) === 'cancelled', '任务状态应保持 cancelled');
+});
+
+test('C2：AI 事实候选记录完整来源与主体字段', function (): void {
+    $owner = make_family_user('c-fact');
+    $familyId = \App\Services\FamilyService::create($owner, '事实来源家族', 'c-fact-' . bin2hex(random_bytes(3)));
+    $personId = \App\Services\FamilyPersonService::create($owner, $familyId, ['name' => '来源人物', 'is_deceased' => true]);
+    $factId = \App\Services\AiWorkflowService::addFactCandidate(
+        $owner, $familyId, 'date', '1990年3月迁往南方', 'ai_extraction',
+        null, $personId, 0.75, '原文：1990年3月迁往南方', 101, 202, 'person', $personId
+    );
+    $fact = Db::fetch('SELECT * FROM memory_facts WHERE id = ? LIMIT 1', [$factId]);
+    check($fact !== null, '事实未入库');
+    check((string) $fact['source_excerpt'] === '原文：1990年3月迁往南方', '来源摘录未写入');
+    check((int) $fact['source_archive_id'] === 101 && (int) $fact['source_version_id'] === 202, '来源档案/版本未写入');
+    check((string) $fact['subject_type'] === 'person' && (int) $fact['subject_id'] === $personId, '主体字段未写入');
+    check((string) $fact['verification_status'] === 'pending', 'AI 事实不得自动确认');
+});
+
+echo "\n[Phase C：归档异步清理]\n";
+
+test('C4：归档审批入队，worker 幂等清理且不动共享文件', function (): void {
+    $owner = make_family_user('c-cleanup');
+    $familyId = \App\Services\FamilyService::create($owner, '清理家族', 'c-cleanup-' . bin2hex(random_bytes(3)));
+    $archiveId = \App\Services\ArchiveService::create($owner, $familyId, ['title' => '待清理档案', 'privacy' => 'private']);
+    $tmp = sys_get_temp_dir() . '/c-cleanup-' . bin2hex(random_bytes(4)) . '.png';
+    $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', true);
+    check(is_string($png), '测试 PNG 解码失败');
+    file_put_contents($tmp, $png);
+
+    login((string) $owner['email'], 'FamilyTest@123');
+    $upload = http('POST', '/archives/' . $archiveId . '/files', [
+        '_token' => csrf_token('/archives/' . $archiveId),
+    ], ['file' => $tmp], false);
+    check($upload['status'] === 302, '上传应重定向');
+    $file = Db::fetch('SELECT * FROM archive_files WHERE archive_id = ? LIMIT 1', [$archiveId]);
+    check($file !== null, '缺少档案文件记录');
+    $storageKey = (string) $file['storage_key'];
+    $absolute = \App\Core\Storage::absolute($storageKey);
+    check($absolute !== null && is_file($absolute), '物理文件应存在');
+
+    \App\Services\ArchiveService::requestDelete($owner, $archiveId);
+    \App\Services\ArchiveService::approveDelete($owner, $archiveId, true);
+    check((string) Db::value('SELECT status FROM archives WHERE id = ?', [$archiveId]) === 'deleted', '档案应进入 deleted');
+    check(db_count('archive_cleanup_queue', "archive_id = ? AND status = 'pending'", [$archiveId]) === 1, '应生成一条待清理队列');
+    check(db_count('archive_files', 'archive_id = ?', [$archiveId]) === 1, '审批时不应同步删除文件记录');
+    check(is_file((string) $absolute), '审批时不应同步删除物理文件');
+
+    $command = 'php ' . escapeshellarg(BASE_PATH . '/bin/archive-cleanup.php') . ' --once --limit=10 2>&1';
+    $output = [];
+    $rc = 0;
+    exec($command, $output, $rc);
+    check($rc === 0, '清理 worker 失败：' . implode("\n", $output));
+    check(db_count('archive_cleanup_queue', "archive_id = ? AND status = 'done'", [$archiveId]) === 1, '队列项应完成');
+    check(db_count('archive_files', 'archive_id = ?', [$archiveId]) === 0, '文件记录应被清理');
+    check(!is_file($absolute), '物理文件应被清理');
+
+    $output2 = [];
+    $rc2 = 0;
+    exec($command, $output2, $rc2);
+    check($rc2 === 0, '重复运行 worker 不应失败');
+    check(db_count('archive_cleanup_queue', "archive_id = ? AND status = 'done'", [$archiveId]) === 1, '重复运行不应新增队列项');
+    @unlink($tmp);
+});
+
+echo "\n[Phase D：配置与审计]\n";
+
+test('D：审计元信息脱敏（邮箱/密码/证件号）', function (): void {
+    $email = 'd-audit-' . getmypid() . '@example.com';
+    \App\Core\Audit::log('d.meta.redaction', 'user', 1, [
+        'email' => $email,
+        'password' => 'PlainSecret' . getmypid(),
+        'token' => 'secret-token-value',
+        'id_number' => '110101199001011234',
+        'note' => "第一行\n第二行",
+    ], 1);
+    $row = Db::fetch("SELECT meta FROM audit_logs WHERE action = 'd.meta.redaction' ORDER BY id DESC LIMIT 1");
+    check($row !== null, '审计记录未写入');
+    $raw = (string) $row['meta'];
+    $meta = json_decode($raw, true);
+    check(is_array($meta), '审计 meta 不是合法 JSON');
+    check(str_contains((string) ($meta['email'] ?? ''), '***@example.com'), '邮箱未脱敏');
+    check(!str_contains($raw, 'PlainSecret'), '密码原文不应写入审计');
+    check(!str_contains($raw, 'secret-token-value'), 'Token 原文不应写入审计');
+    check(!str_contains($raw, '110101199001011234'), '证件号不应写入审计');
+    check(($meta['password'] ?? '') === '[redacted]', '敏感键应标记为已脱敏');
+});
+
+test('D：API 令牌签发写入带 actor 的审计', function (): void {
+    $login = api('POST', '/api/v1/auth/token', ['email' => 'demo@example.com', 'password' => 'Demo@123456']);
+    check($login['status'] === 200, 'API 登录应成功');
+    check(
+        db_count('audit_logs', "action = 'auth.api_token_create' AND actor_user_id IS NOT NULL") >= 1,
+        'API 令牌签发审计缺失 actor_user_id'
+    );
+});
+
+test('D：生产环境开启 APP_DEBUG 时配置 fail-closed', function (): void {
+    $script = sys_get_temp_dir() . '/yxt-debug-check-' . getmypid() . '.php';
+    file_put_contents($script, '<?php define("BASE_PATH", ' . var_export(BASE_PATH, true) . '); require BASE_PATH . "/app/bootstrap.php";');
+    $command = 'APP_ENV=production APP_DEBUG=true php ' . escapeshellarg($script) . ' 2>&1';
+    $output = [];
+    $rc = 0;
+    exec($command, $output, $rc);
+    @unlink($script);
+    check($rc !== 0, '生产环境 APP_DEBUG=true 必须拒绝启动');
+    check(str_contains(implode("\n", $output), 'APP_DEBUG'), '错误信息应说明 APP_DEBUG');
+});
+
+echo "\n[Phase D：小程序页面]\n";
+
+test('D：小程序新增页面已注册且四件套齐全', function (): void {
+    $config = json_decode((string) file_get_contents(BASE_PATH . '/miniprogram/app.json'), true);
+    $pages = (array) ($config['pages'] ?? []);
+    $required = [
+        'pages/persons/list',
+        'pages/genealogy/index',
+        'pages/timeline/list',
+        'pages/exhibitions/list',
+        'pages/ai/workflow',
+        'pages/invitations/accept',
+    ];
+    foreach ($required as $page) {
+        check(in_array($page, $pages, true), '小程序未注册页面 ' . $page);
+        foreach (['js', 'json', 'wxml', 'wxss'] as $ext) {
+            check(is_file(BASE_PATH . '/miniprogram/' . $page . '.' . $ext), '缺少页面文件 ' . $page . '.' . $ext);
+        }
+    }
+});
+
+echo "\n[Phase D：性能索引]\n";
+
+test('D：性能索引迁移已应用', function (): void {
+    check(
+        db_count('schema_migrations', "version = '20261128_005' AND status = 'applied'") === 1,
+        '性能索引迁移 20261128_005 未应用'
+    );
+    $personIndex = Db::fetchAll("SHOW INDEX FROM family_persons WHERE Key_name = 'idx_person_family_deleted_id'");
+    check(count($personIndex) >= 1, 'family_persons 组合索引缺失');
+    $relationIndex = Db::fetchAll("SHOW INDEX FROM person_relationships WHERE Key_name = 'idx_rel_family_id'");
+    check(count($relationIndex) >= 1, 'person_relationships 组合索引缺失');
+});
+
+echo "\n[Phase E：最终回归补充]\n";
+
+test('E：AI 工作流完成写入站内通知且只写一次', function (): void {
+    $owner = make_family_user('e-notify');
+    $familyId = \App\Services\FamilyService::create($owner, '通知家族', 'e-notify-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '1990年3月，祖父从北方迁往南方。',
+    ], 'e-notify-key');
+    \App\Services\AiWorkflowService::process($id, 'e-inline');
+    check((string) Db::value('SELECT status FROM ai_workflows WHERE id = ?', [$id]) === 'completed', '任务未完成');
+    check(
+        db_count('notifications', "user_id = ? AND type = 'ai_workflow_completed' AND link LIKE ?", [
+            (int) $owner['id'], '%workflow=' . $id,
+        ]) === 1,
+        '应生成且仅生成一条完成通知'
+    );
+});
+
+test('E：10 个 Worker 并发领取同一任务只有一个有效执行者', function (): void {
+    $owner = make_family_user('e-claim-race');
+    $familyId = \App\Services\FamilyService::create($owner, '并发家族', 'e-race-' . bin2hex(random_bytes(3)));
+    $id = \App\Services\AiWorkflowService::create($owner, $familyId, 'extract_facts', [
+        'text' => '并发领取验证资料。',
+    ], 'e-race-' . bin2hex(random_bytes(6)));
+
+    $script = BASE_PATH . '/tests/concurrency/claim-once.php';
+    $processes = [];
+    for ($i = 0; $i < 10; $i++) {
+        $command = 'php ' . escapeshellarg($script) . ' ' . escapeshellarg('e-worker-' . $i) . ' 1';
+        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $pipes = [];
+        $handle = proc_open($command, $descriptors, $pipes);
+        check(is_resource($handle), '无法启动并发领取子进程');
+        $processes[] = [$handle, $pipes];
+    }
+
+    $winners = [];
+    foreach ($processes as [$handle, $pipes]) {
+        $out = trim((string) stream_get_contents($pipes[1]));
+        $err = trim((string) stream_get_contents($pipes[2]));
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $rc = proc_close($handle);
+        check($rc === 0, '并发领取子进程失败：' . $err);
+        $ids = json_decode($out, true);
+        check(is_array($ids), '并发领取输出不是 JSON：' . $out);
+        if (in_array($id, array_map('intval', $ids), true)) {
+            $winners[] = $id;
+        }
+    }
+    check(count($winners) === 1, '同一任务只能被一个 Worker 领取，实际：' . count($winners));
+    $workflow = Db::fetch('SELECT status, locked_by FROM ai_workflows WHERE id = ? LIMIT 1', [$id]);
+    check($workflow !== null && $workflow['status'] === 'processing', '任务应处于 processing');
+    check(str_starts_with((string) $workflow['locked_by'], 'e-worker-'), 'locked_by 应为并发 Worker 之一');
 });
 
 echo "\n========== 结果 ==========\n";

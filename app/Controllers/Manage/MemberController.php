@@ -39,7 +39,7 @@ final class MemberController
 
         $validator = Validator::make(
             ['email' => $email, 'role' => $role],
-            ['email' => 'email|max:190', 'role' => 'required|in:editor,viewer'],
+            ['email' => 'required|email|max:190', 'role' => 'required|in:editor,viewer'],
             ['email' => '受邀邮箱', 'role' => '角色']
         );
 
@@ -101,6 +101,8 @@ final class MemberController
         }
 
         Member::updateRole((int) $member['id'], $role);
+        Auth::clear();
+        Policy::clearCache();
         Audit::log('member.update_role', 'memorial_member', (int) $member['id'], [
             'memorial_id' => (int) $memorial['id'],
             'from' => $member['role'],
@@ -129,6 +131,8 @@ final class MemberController
         }
 
         Member::revoke((int) $member['id']);
+        Auth::clear();
+        Policy::clearCache();
         Audit::log('member.revoke', 'memorial_member', (int) $member['id'], [
             'memorial_id' => (int) $memorial['id'],
             'user_id' => (int) $member['user_id'],
@@ -153,6 +157,8 @@ final class MemberController
         }
 
         Invitation::revoke((int) $invitation['id'], (int) $memorial['id']);
+        Auth::clear();
+        Policy::clearCache();
         Audit::log('invitation.revoke', 'invitation', (int) $invitation['id'], [
             'memorial_id' => (int) $memorial['id'],
         ]);

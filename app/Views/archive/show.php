@@ -36,7 +36,7 @@
                     <td class="muted small"><?= e($file['file_role']) ?></td>
                     <td><a class="text-link" href="<?= e(url('/archives/files/' . (int) $file['id'] . '/download')) ?>">下载</a></td>
                 </tr>
-                <tr><td colspan="4" class="muted small" style="word-break:break-all;">SHA-256 <?= e($file['sha256']) ?></td></tr>
+                <tr><td colspan="4" class="muted small" style="word-break:break-all;">入库文件 SHA-256 <?= e($file['sha256']) ?></td></tr>
                 <?php if (str_starts_with((string) $file['mime_type'], 'image/')): ?>
                     <tr><td colspan="4">
                         <?php if (($photoTags[(int) $file['id']] ?? []) !== []): ?>
@@ -74,6 +74,21 @@
                 <div class="field"><label for="file">上传原始文件（不会覆盖已有文件）</label><input id="file" name="file" type="file" required></div>
                 <button class="button button--small" type="submit">上传并归档</button>
             </form>
+            <div class="batch-panel" data-batch-panel hidden>
+                <h3>批量归档</h3>
+                <p class="muted small">一次选择多个文件，按选择顺序逐个上传；失败的文件可单独重试。</p>
+                <form method="post" enctype="multipart/form-data" action="<?= e(url('/archives/' . (int) $archive['id'] . '/files')) ?>" class="batch-form" data-batch-upload data-batch-results="#archive-batch-results">
+                    <?= csrf_field() ?>
+                    <label class="field batch-form__file">
+                        <span>选择多个文件</span>
+                        <input type="file" name="file[]" multiple required>
+                    </label>
+                    <div><button class="button button--small" type="submit">按顺序归档</button></div>
+                </form>
+                <p class="batch-summary" data-batch-summary role="status" aria-live="polite"></p>
+                <ul class="batch-results" id="archive-batch-results" aria-live="polite"></ul>
+                <p class="muted small">上传完成后刷新页面即可看到新文件；上方的单个上传表单始终可用。</p>
+            </div>
         <?php endif; ?>
     </section>
 
@@ -149,3 +164,4 @@
     <?php endif; ?>
 </div>
 <script src="<?= e(url('assets/js/photo-tags.js')) ?>" defer></script>
+<script src="<?= e(url('assets/js/batch-upload.js')) ?>" defer></script>

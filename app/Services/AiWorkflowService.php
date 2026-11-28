@@ -9,6 +9,8 @@ use App\Core\HttpException;
 use App\Core\Policy;
 use App\Services\Ai\AiClientFactory;
 use App\Services\Ai\ProcessingClient;
+use App\Services\Ai\ProcessingException;
+use PDOException;
 use RuntimeException;
 use Throwable;
 
@@ -49,26 +51,41 @@ final class AiWorkflowService
             return (int) $existing;
         }
 
-        $id = Db::transaction(static function () use ($familyId, $type, $input, $key, $user): int {
-            $newId = Db::insert('ai_workflows', [
-                'family_id' => $familyId,
-                'workflow_type' => $type,
-                'status' => 'queued',
-                'idempotency_key' => $key,
-                'input_json' => json_encode($input, JSON_UNESCAPED_UNICODE),
-                'provider' => AiClientFactory::resolve('text')['provider'],
-                'prompt_version' => self::PROMPT_VERSION,
-                'created_by' => (int) ($user['id'] ?? 0),
-            ]);
-            foreach (self::TYPES[$type][1] as $index => $step) {
-                Db::insert('ai_workflow_steps', [
-                    'workflow_id' => $newId,
-                    'step_no' => $index + 1,
-                    'name' => $step,
+        try {
+            $id = Db::transaction(static function () use ($familyId, $type, $input, $key, $user): int {
+                $newId = Db::insert('ai_workflows', [
+                    'family_id' => $familyId,
+                    'workflow_type' => $type,
+                    'status' => 'queued',
+                    'idempotency_key' => $key,
+                    'input_json' => json_encode($input, JSON_UNESCAPED_UNICODE),
+                    'provider' => AiClientFactory::resolve('text')['provider'],
+                    'prompt_version' => self::PROMPT_VERSION,
+                    'created_by' => (int) ($user['id'] ?? 0),
                 ]);
+                foreach (self::TYPES[$type][1] as $index => $step) {
+                    Db::insert('ai_workflow_steps', [
+                        'workflow_id' => $newId,
+                        'step_no' => $index + 1,
+                        'name' => $step,
+                    ]);
+                }
+                return $newId;
+            });
+        } catch (PDOException $e) {
+            // 并发创建同一幂等键时唯一键冲突：回查已落库任务，保持幂等语义
+            if (($e->errorInfo[0] ?? '') !== '23000') {
+                throw $e;
             }
-            return $newId;
-        });
+            $existing = Db::value(
+                'SELECT id FROM ai_workflows WHERE family_id = ? AND workflow_type = ? AND idempotency_key = ? LIMIT 1',
+                [$familyId, $type, $key]
+            );
+            if ($existing === null) {
+                throw $e; // 非重复键导致的外键等完整性错误仍按原异常抛出
+            }
+            return (int) $existing;
+        }
 
         Audit::log('ai.workflow.created', 'ai_workflow', $id, [
             'family_id' => $familyId, 'type' => $type,
@@ -166,7 +183,8 @@ final class AiWorkflowService
     {
         return (int) Db::value(
             "SELECT COUNT(*) FROM ai_workflows
-             WHERE id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?",
+             WHERE id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?
+               AND (lease_until IS NULL OR lease_until > NOW())",
             [$id, $workerId, $lockVersion]
         ) === 1;
     }
@@ -181,8 +199,27 @@ final class AiWorkflowService
         $recovered = 0;
         foreach ($expired as $row) {
             $id = (int) $row['id'];
-            $retry = min((int) $row['retry_count'] + 1, (int) Db::value('SELECT max_retries FROM ai_workflows WHERE id = ?', [$id]));
+            if (self::consentRevokedForWorkflow($id)) {
+                $ok = Db::update('ai_workflows', [
+                    'status' => 'cancelled',
+                    'failure_class' => 'consent_revoked',
+                    'error_message' => '受访者已撤回授权，任务取消且不再重试',
+                    'last_error_at' => date('Y-m-d H:i:s'),
+                    'locked_by' => null,
+                    'lease_until' => null,
+                    'heartbeat_at' => null,
+                    'lock_version' => (int) $row['lock_version'] + 1,
+                ], "id = ? AND status = 'processing' AND lease_until IS NOT NULL AND lease_until < NOW()
+                    AND locked_by = ? AND lock_version = ?", [$id, (string) $row['locked_by'], (int) $row['lock_version']]);
+                if ($ok === 1) {
+                    Audit::log('ai.workflow.consent_revoked', 'ai_workflow', $id, [
+                        'previous_worker' => (string) $row['locked_by'],
+                    ]);
+                }
+                continue;
+            }
             $max = (int) Db::value('SELECT max_retries FROM ai_workflows WHERE id = ?', [$id]);
+            $retry = min((int) $row['retry_count'] + 1, $max);
             $ok = Db::update('ai_workflows', [
                 'status' => $retry < $max ? 'queued' : 'failed',
                 'failure_class' => 'lease_expired',
@@ -210,6 +247,25 @@ final class AiWorkflowService
             "SELECT id, retry_count FROM ai_workflows WHERE status = 'failed' AND retry_count < max_retries AND run_after <= NOW()"
         );
         foreach ($failed as $row) {
+            if (self::consentRevokedForWorkflow((int) $row['id'])) {
+                $ok = Db::update(
+                    'ai_workflows',
+                    [
+                        'status' => 'cancelled',
+                        'failure_class' => 'consent_revoked',
+                        'error_message' => '受访者已撤回授权，任务取消且不再重试',
+                        'last_error_at' => date('Y-m-d H:i:s'),
+                        'locked_by' => null,
+                        'lease_until' => null,
+                    ],
+                    "id = ? AND status = 'failed' AND retry_count < max_retries",
+                    [(int) $row['id']]
+                );
+                if ($ok === 1) {
+                    Audit::log('ai.workflow.consent_revoked', 'ai_workflow', (int) $row['id'], []);
+                }
+                continue;
+            }
             $delay = min(60, 2 ** (int) $row['retry_count']);
             $ok = Db::update(
                 'ai_workflows',
@@ -242,14 +298,19 @@ final class AiWorkflowService
                 throw new RuntimeException('任务已被其他 Worker 领取');
             }
         }
+        if ($lockVersion === null) {
+            // Web 入口未携带 fencing token：领取后回读当前版本，后续成功/失败写入均按此版本围栏
+            $lockVersion = (int) Db::value('SELECT lock_version FROM ai_workflows WHERE id = ?', [$id]);
+        }
 
         $type = (string) $workflow['workflow_type'];
         $input = json_decode((string) $workflow['input_json'], true) ?: [];
         $familyId = (int) $workflow['family_id'];
         try {
+            self::assertRunAuthorized($type, $input, $familyId);
             $output = self::run($type, $input);
             Db::transaction(static function () use ($id, $output, $familyId, $workflow, $input, $workerId, $lockVersion): void {
-                if ($lockVersion !== null && !self::owns($id, $workerId, $lockVersion)) {
+                if (!self::owns($id, $workerId, $lockVersion)) {
                     throw new RuntimeException('任务持有权在提交前失效');
                 }
                 $steps = Db::fetchAll('SELECT id, name FROM ai_workflow_steps WHERE workflow_id = ? ORDER BY step_no', [$id]);
@@ -270,10 +331,8 @@ final class AiWorkflowService
                     'lease_until' => null,
                     'locked_by' => null,
                     'finished_at' => date('Y-m-d H:i:s'),
-                ], $lockVersion !== null
-                    ? "id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?"
-                    : 'id = ?',
-                    $lockVersion !== null ? [$id, $workerId, $lockVersion] : [$id]);
+                ], "id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?",
+                    [$id, $workerId, $lockVersion]);
                 Db::insert('ai_generation_logs', [
                     'workflow_id' => $id,
                     'family_id' => $familyId,
@@ -285,13 +344,36 @@ final class AiWorkflowService
                 ]);
             });
             Audit::log('ai.workflow.completed', 'ai_workflow', $id, ['family_id' => $familyId, 'type' => $type]);
+            // R-23：仅在工作流首次成功提交后发一条站内完成通知；通知失败不回滚业务结果。
+            try {
+                $link = '/families/' . $familyId . '/ai?workflow=' . $id;
+                $exists = (int) Db::value(
+                    'SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = ? AND link = ?',
+                    [(int) $workflow['created_by'], 'ai_workflow_completed', $link]
+                );
+                if ($exists === 0) {
+                    \App\Services\NotificationService::emit(
+                        $familyId,
+                        (int) $workflow['created_by'],
+                        'ai_workflow_completed',
+                        'AI 整理任务已完成',
+                        '任务 #' . $id . ' 已完成，请人工审核候选事实后再采用。',
+                        $link
+                    );
+                }
+            } catch (\Throwable $e) {
+                error_log('ai.workflow.notify failed [workflow=' . $id . ']: ' . $e->getMessage());
+            }
             return self::find($id) ?? $workflow;
         } catch (Throwable $e) {
             $retry = (int) $workflow['retry_count'] + 1;
             $max = (int) $workflow['max_retries'];
-            $class = $e instanceof HttpException ? 'input_error' : 'provider_error';
-            if ($class === 'input_error') {
-                $retry = $max; // 参数/授权错误不重试
+            $class = $e instanceof HttpException
+                ? 'input_error'
+                : ($e instanceof ProcessingException ? $e->category : 'provider_error');
+            // 参数/授权错误一律不重试；Provider 明确标记不可重试的错误也不再重试
+            if ($class === 'input_error' || ($e instanceof ProcessingException && $e->retryable === false)) {
+                $retry = $max;
             }
             Db::update('ai_workflow_steps', [
                 'status' => 'failed',
@@ -308,13 +390,11 @@ final class AiWorkflowService
                 'lease_until' => null,
                 'locked_by' => null,
                 'run_after' => date('Y-m-d H:i:s', time() + ($status === 'queued' ? $delay : 0)),
-            ], $lockVersion !== null
-                ? "id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?"
-                : 'id = ?',
-                $lockVersion !== null ? [$id, $workerId, $lockVersion] : [$id]);
+            ], "id = ? AND status = 'processing' AND locked_by = ? AND lock_version = ?",
+                [$id, $workerId, $lockVersion]);
             Db::update('ai_workflows', ['last_error_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
             Audit::log('ai.workflow.failed', 'ai_workflow', $id, [
-                'class' => $class, 'retry' => $retry, 'error' => mb_substr($e->getMessage(), 0, 120),
+                'class' => $class, 'retry' => $retry, 'error_hash' => hash('sha256', $e->getMessage()),
             ]);
             throw $e;
         }
@@ -335,10 +415,12 @@ final class AiWorkflowService
         if (!in_array($workflow['status'], ['queued', 'failed', 'processing'], true)) {
             throw new HttpException(422, '该任务已结束，无法取消');
         }
-        Db::update('ai_workflows', [
-            'status' => 'cancelled', 'lease_until' => null, 'locked_by' => null,
-            'finished_at' => date('Y-m-d H:i:s'),
-        ], 'id = ?', [$id]);
+        // 取消时递增 fencing 版本：持旧版本的 Worker 此后无法写回处理结果
+        Db::query(
+            "UPDATE ai_workflows SET status = 'cancelled', lease_until = NULL, locked_by = NULL,
+             lock_version = lock_version + 1, finished_at = ? WHERE id = ?",
+            [date('Y-m-d H:i:s'), $id]
+        );
         Db::update('ai_workflow_steps', ['status' => 'skipped'], 'workflow_id = ? AND status IN (\'queued\',\'failed\')', [$id]);
         Audit::log('ai.workflow.cancelled', 'ai_workflow', $id, ['family_id' => $familyId], (int) ($user['id'] ?? 0));
     }
@@ -352,7 +434,12 @@ final class AiWorkflowService
         string $sourceType,
         ?int $sourceId = null,
         ?int $personId = null,
-        float $confidence = 0.5
+        float $confidence = 0.5,
+        ?string $sourceExcerpt = null,
+        ?int $sourceArchiveId = null,
+        ?int $sourceVersionId = null,
+        ?string $subjectType = null,
+        ?int $subjectId = null
     ): int {
         if (!in_array($sourceType, ['user_input', 'oral_history', 'archive_ocr', 'ai_extraction', 'family_confirmation', 'imported'], true)) {
             throw new HttpException(422, '未知的事实来源类型');
@@ -377,6 +464,11 @@ final class AiWorkflowService
                 }
             }
         }
+        if ($subjectType === null || $subjectId === null) {
+            // 未显式指定主体时：人物事实归属人物，其余归属家族
+            $subjectType = $personId !== null ? 'person' : 'family';
+            $subjectId = $personId ?? $familyId;
+        }
         $id = Db::insert('memory_facts', [
             'family_id' => $familyId,
             'person_id' => $personId,
@@ -384,6 +476,11 @@ final class AiWorkflowService
             'fact_content' => mb_substr($content, 0, 2000),
             'source_type' => $sourceType,
             'source_id' => $sourceId,
+            'source_archive_id' => $sourceArchiveId,
+            'source_version_id' => $sourceVersionId,
+            'source_excerpt' => $sourceExcerpt,
+            'subject_type' => $subjectType,
+            'subject_id' => $subjectId,
             'confidence' => max(0, min(0.999, $confidence)),
             'verification_status' => 'pending',
             'submitted_by' => (int) ($user['id'] ?? 0),
@@ -577,6 +674,37 @@ final class AiWorkflowService
         }
     }
 
+    /** 会话授权复核：仅带 session_id 的工作流受此授权通道约束；无法确认授权时一律视为已撤回。 */
+    private static function consentRevokedForWorkflow(int $id): bool
+    {
+        $workflow = self::find($id);
+        if ($workflow === null) {
+            return false;
+        }
+        $input = json_decode((string) $workflow['input_json'], true);
+        if (!is_array($input) || empty($input['session_id'])) {
+            return false; // 非会话工作流不受该授权通道影响
+        }
+        $session = self::session((int) $input['session_id']);
+        $status = $session === null ? '' : (string) ($session['consent_status'] ?? '');
+        return $status !== 'granted';
+    }
+
+    /** 执行前复核会话授权；抛 HttpException 以便被 process() 归类为 input_error 且不重试。 */
+    private static function assertRunAuthorized(string $type, array $input, ?int $familyId = null): void
+    {
+        if (empty($input['session_id'])) {
+            return;
+        }
+        $session = self::session((int) $input['session_id']);
+        if ($session === null || ($session['consent_status'] ?? '') !== 'granted') {
+            throw new HttpException(422, '受访者已撤回授权，任务不再执行');
+        }
+        if ($type === 'transcribe_audio' && $familyId !== null && (int) $session['family_id'] !== $familyId) {
+            throw new HttpException(404, '采访不存在或不属于该家族');
+        }
+    }
+
     private static function run(string $type, array $input): array
     {
         $text = trim((string) ($input['text'] ?? ''));
@@ -741,9 +869,9 @@ final class AiWorkflowService
         self::setConsent($user, $sessionId, false);
         Db::query(
             "UPDATE ai_workflows SET status = 'cancelled', locked_by = NULL, lease_until = NULL
-             WHERE family_id = ? AND status IN ('queued','processing')
-               AND JSON_EXTRACT(input_json, '$.session_id') = ?",
-            [(int) $session['family_id'], $sessionId]
+             WHERE family_id = ? AND status IN ('queued','processing','failed')
+               AND JSON_UNQUOTE(JSON_EXTRACT(input_json, '$.session_id')) = ?",
+            [(int) $session['family_id'], (string) $sessionId]
         );
         Audit::log('oral_history.consent_revoked', 'oral_history_session', $sessionId, [
             'family_id' => (int) $session['family_id'],

@@ -342,7 +342,7 @@ final class FamilyService
             'SELECT f.*, fm.role AS member_role, fm.status AS member_status
              FROM family_members fm JOIN families f ON f.id = fm.family_id
              WHERE fm.user_id = ? AND fm.status = ? AND f.status = ?
-             ORDER BY f.id',
+             ORDER BY f.id LIMIT 200',
             [$userId, 'active', 'active']
         );
     }

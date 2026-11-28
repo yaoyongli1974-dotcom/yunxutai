@@ -1,0 +1,37 @@
+<view class="page">
+  <view class="head"><text class="title">家族人物</text><text class="sub">{{familyName}}</text></view>
+  <view class="bar" bindtap="toggleForm">＋ 新建人物</view>
+  <view class="form" wx:if="{{showForm}}">
+    <input class="field" placeholder="姓名" value="{{name}}" bindinput="onName" />
+    <picker mode="selector" range="{{genderLabels}}" value="{{genderIndex}}" bindchange="onGender">
+      <view class="field picker">性别：{{genderLabels[genderIndex]}}</view>
+    </picker>
+    <input class="field" placeholder="出生日期（YYYY-MM-DD）" value="{{birthDate}}" bindinput="onBirthDate" />
+    <input class="field" placeholder="逝世日期（YYYY-MM-DD）" value="{{deathDate}}" bindinput="onDeathDate" />
+    <input class="field" placeholder="出生地" value="{{birthPlace}}" bindinput="onBirthPlace" />
+    <input class="field" placeholder="逝世地" value="{{deathPlace}}" bindinput="onDeathPlace" />
+    <input class="field" placeholder="人物简介" value="{{biography}}" bindinput="onBiography" />
+    <picker mode="selector" range="{{privacyLabels}}" value="{{privacyIndex}}" bindchange="onPrivacy">
+      <view class="field picker">隐私：{{privacyLabels[privacyIndex]}}</view>
+    </picker>
+    <text class="tip">活人资料默认且必须保持私密，需单独授权后才能公开。</text>
+    <button class="primary" bindtap="onCreate">创建</button>
+  </view>
+  <view class="empty" wx:if="{{!loading && !persons.length}}">还没有人物档案，先添加一位吧。</view>
+  <view class="card" wx:for="{{persons}}" wx:key="id" data-id="{{item.id}}" bindtap="onOpen">
+    <text class="card-title">{{item.name}}</text>
+    <text class="card-meta">{{item.birth_date || '?'} — {{item.death_date || '?'}}</text>
+    <text class="card-tag">{{item.genderLabel}} · {{item.privacyLabel}}</text>
+  </view>
+  <view class="detail" wx:if="{{detail}}">
+    <view class="detail-head">
+      <text class="detail-title">{{detail.name}}</text>
+      <text class="close" bindtap="onCloseDetail">关闭</text>
+    </view>
+    <text class="card-meta">性别：{{detail.genderLabel}} · 隐私：{{detail.privacyLabel}} · {{detail.verificationLabel}}</text>
+    <text class="card-meta">生卒：{{detail.birthDate || '?'} — {{detail.deathDate || '?'}}</text>
+    <text class="card-meta" wx:if="{{detail.birthPlace}}">出生地：{{detail.birthPlace}}</text>
+    <text class="card-meta" wx:if="{{detail.deathPlace}}">逝世地：{{detail.deathPlace}}</text>
+    <text class="bio" wx:if="{{detail.biography}}">{{detail.biography}}</text>
+  </view>
+</view>

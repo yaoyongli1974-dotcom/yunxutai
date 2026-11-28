@@ -57,6 +57,8 @@ final class UserController
         $status = $action === 'enable' ? 'active' : 'disabled';
         // 后台不允许在此处修改角色，角色变更需通过独立的授权流程。
         User::update((int) $target['id'], ['status' => $status]);
+        // 用户状态变更后清除身份缓存，避免同一进程内继续读到旧的启用状态。
+        Auth::clear();
         Audit::log('admin.user.' . $action, 'user', (int) $target['id'], [
             'status' => $status,
             'email' => (string) $target['email'],
@@ -81,6 +83,7 @@ final class UserController
             'totp_secret' => null,
             'totp_enabled' => 0,
         ]);
+        Auth::clear();
         Audit::log('totp.reset', 'user', (int) $target['id'], [
             'email' => (string) $target['email'],
         ]);

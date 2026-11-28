@@ -118,8 +118,9 @@ final class AuthController
                 'next' => $next,
             ], 'layout', 429);
         }
+        // 每次凭证尝试都计入 IP 维度，防止轮换账号绕过账号维度的尝试次数上限。
+        RateLimiter::hit(\App\Core\RateLimitKeys::make('login_ip', $request->ip()), 30, 3600);
         if (!RateLimiter::hit(\App\Core\RateLimitKeys::make('login', $email, $request->ip()), (int) config('security.login_max_attempts'), (int) config('security.login_window'))) {
-            RateLimiter::hit(\App\Core\RateLimitKeys::make('login_ip', $request->ip()), 30, 3600);
             return View::render('auth/login', [
                 'title' => '登录',
                 'errors' => ['form' => '尝试次数过多，请 15 分钟后再试'],
@@ -141,6 +142,8 @@ final class AuthController
                 $errors['form'] = '邮箱或密码不正确';
             } else {
                 RateLimiter::clear(\App\Core\RateLimitKeys::make('login', $email, $request->ip()));
+                // 成功登录视为可信凭证，重置 IP 维度计数；失败尝试仍持续累计，防止跨账号暴力尝试。
+                RateLimiter::clear(\App\Core\RateLimitKeys::make('login_ip', $request->ip()));
                 if ((int) ($user['totp_enabled'] ?? 0) === 1) {
                     // 密码通过但二次验证未完成：此时不建立登录态，只保存短时待验证上下文。
                     session_regenerate_id(true);
@@ -150,6 +153,9 @@ final class AuthController
                         'uid' => (int) $user['id'],
                         'next' => $next,
                         'at' => time(),
+                        // 待验证上下文绑定当前 UA/IP，复制会话到其它环境不能完成二次验证。
+                        'ua_hash' => hash('sha256', (string) ($_SERVER['HTTP_USER_AGENT'] ?? '')),
+                        'ip' => $request->ip(),
                     ];
                     return Response::redirect('/2fa');
                 }
@@ -198,6 +204,13 @@ final class AuthController
 
         $user = User::find((int) $pending['uid']);
         if ($user === null || $user['status'] !== 'active' || (int) $user['totp_enabled'] !== 1 || (string) ($user['totp_secret'] ?? '') === '') {
+            $this->clearPending();
+            Flash::error('二次验证状态已变更，请重新登录。');
+            return Response::redirect('/login');
+        }
+
+        if (($pending['ua_hash'] ?? null) !== hash('sha256', (string) ($_SERVER['HTTP_USER_AGENT'] ?? ''))
+            || ($pending['ip'] ?? null) !== $request->ip()) {
             $this->clearPending();
             Flash::error('二次验证状态已变更，请重新登录。');
             return Response::redirect('/login');

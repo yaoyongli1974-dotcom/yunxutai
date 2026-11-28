@@ -42,6 +42,9 @@ jobs:
       WX_SECRET: ci-test-secret
     steps:
       - uses: actions/checkout@v6
+        with:
+          # gitleaks 在 PR 上按 base..head 扫描提交历史，浅克隆缺少 base commit 会误报失败。
+          fetch-depth: 0
 
       - uses: shivammathur/setup-php@v2
         with:

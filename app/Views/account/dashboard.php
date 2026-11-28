@@ -9,6 +9,41 @@
             <a class="button" href="<?= e(url('/manage/memorials/new')) ?>">为亲人创建纪念馆</a>
         </header>
 
+        <?php if ($memorials === []): ?>
+            <?php $onboardingKey = 'yxt-onboarding-dismissed-' . (int) ($user['id'] ?? 0); ?>
+            <aside class="notice-card onboarding" data-onboarding data-onboarding-key="<?= e($onboardingKey) ?>" aria-label="新手引导">
+                <div class="onboarding__head">
+                    <div>
+                        <p class="eyebrow">从零开始</p>
+                        <h2 class="onboarding__title">五步，把回忆安放好</h2>
+                    </div>
+                    <button class="button button--small button--ghost onboarding__skip" type="button" data-onboarding-dismiss>跳过引导</button>
+                </div>
+                <ol class="onboarding__list">
+                    <li class="onboarding__step">
+                        <span class="onboarding__num" aria-hidden="true">1</span>
+                        <span><a class="text-link" href="<?= e(url('/manage/memorials/new')) ?>">创建纪念馆</a><span class="onboarding__hint">免费，默认私密</span></span>
+                    </li>
+                    <li class="onboarding__step">
+                        <span class="onboarding__num" aria-hidden="true">2</span>
+                        <span><span class="onboarding__label">添加纪念人物</span><span class="onboarding__hint">填写逝者信息与生平</span></span>
+                    </li>
+                    <li class="onboarding__step">
+                        <span class="onboarding__num" aria-hidden="true">3</span>
+                        <span><span class="onboarding__label">上传第一批资料</span><span class="onboarding__hint">照片、声音、文字与文件</span></span>
+                    </li>
+                    <li class="onboarding__step">
+                        <span class="onboarding__num" aria-hidden="true">4</span>
+                        <span><span class="onboarding__label">AI 整理（可跳过）</span><span class="onboarding__hint">生成生平草稿，随时可跳过</span></span>
+                    </li>
+                    <li class="onboarding__step">
+                        <span class="onboarding__num" aria-hidden="true">5</span>
+                        <span><span class="onboarding__label">邀请家人</span><span class="onboarding__hint">由馆主发出链接，家人主动接受</span></span>
+                    </li>
+                </ol>
+            </aside>
+        <?php endif; ?>
+
         <div class="section--tight" style="padding-bottom:3.5rem;">
             <?php if ($memorials !== []): ?>
                 <div class="mem-admin-list">
